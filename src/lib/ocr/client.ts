@@ -1,0 +1,162 @@
+import type { OcrLine, OcrOptions, Point, RGBAImage, WorkerRequest, WorkerResponse } from './types';
+import { sortLines, quadBox } from './pipeline';
+
+export interface Rect { x: number; y: number; w: number; h: number }
+export type Progress = (p: { file: string; loaded: number; total: number }) => void;
+
+const BASE = new URL(import.meta.env.BASE_URL, location.href).href;
+
+function roundTo32(v: number) {
+  return Math.max(32, Math.round(v / 32) * 32);
+}
+
+/** Extracts an RGBA image of `rect` from `source`, scaled by `scale`. */
+export function rasterize(source: CanvasImageSource, rect: Rect, outW: number, outH: number): RGBAImage {
+  const canvas = document.createElement('canvas');
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, outW, outH);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(source, rect.x, rect.y, rect.w, rect.h, 0, 0, outW, outH);
+  const img = ctx.getImageData(0, 0, outW, outH);
+  return { data: img.data, width: outW, height: outH };
+}
+
+class LocalEngine {
+  private worker: Worker | null = null;
+  private ready: Promise<string> | null = null;
+  private nextId = 1;
+  private pending = new Map<number, { resolve: (r: { lines: OcrLine[]; ms: { det: number; rec: number } }) => void; reject: (e: Error) => void }>();
+  private progress: Progress | null = null;
+
+  init(onProgress?: Progress): Promise<string> {
+    if (onProgress) this.progress = onProgress;
+    if (this.ready) return this.ready;
+    this.worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+    this.ready = new Promise((resolve, reject) => {
+      this.worker!.onmessage = (ev: MessageEvent<WorkerResponse>) => {
+        const m = ev.data;
+        if (m.type === 'progress') this.progress?.(m);
+        else if (m.type === 'ready') resolve(m.backend);
+        else if (m.type === 'error' && m.id === undefined) { this.ready = null; reject(new Error(m.message)); }
+        else if (m.type === 'error' && m.id !== undefined) { this.pending.get(m.id)?.reject(new Error(m.message)); this.pending.delete(m.id); }
+        else if (m.type === 'result') { this.pending.get(m.id)?.resolve(m); this.pending.delete(m.id); }
+      };
+      this.worker!.onerror = (e) => { this.ready = null; reject(new Error(e.message || 'OCR worker failed to start')); };
+    });
+    this.post({ type: 'init', base: BASE });
+    return this.ready;
+  }
+
+  private post(msg: WorkerRequest, transfer: Transferable[] = []) {
+    this.worker!.postMessage(msg, transfer);
+  }
+
+  async run(det: RGBAImage, src: RGBAImage, opts: OcrOptions) {
+    await this.init();
+    const id = this.nextId++;
+    return new Promise<{ lines: OcrLine[]; ms: { det: number; rec: number } }>((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      this.post({ type: 'run', id, det, src, opts }, [det.data.buffer, src.data.buffer]);
+    });
+  }
+}
+
+export const localEngine = new LocalEngine();
+
+export interface RecognizeOptions extends OcrOptions {
+  detMaxSide: number;
+  engine: 'local' | 'cloud';
+  cloudApiKey?: string;
+}
+
+/**
+ * Recognizes text in `rect` of `source` (defaults to the whole image).
+ * Returned coordinates are in `source` pixel space.
+ */
+export async function recognize(source: HTMLCanvasElement | ImageBitmap, rect: Rect | null, opts: RecognizeOptions): Promise<{ lines: OcrLine[]; ms: number }> {
+  const r = rect ?? { x: 0, y: 0, w: source.width, h: source.height };
+  const t0 = performance.now();
+  let lines: OcrLine[];
+  if (opts.engine === 'cloud') {
+    lines = await cloudRecognize(source, r, opts.cloudApiKey ?? '');
+  } else {
+    // Small selections are upscaled so that text is large enough for the detector.
+    const maxSide = Math.max(r.w, r.h);
+    const srcScale = Math.min(2, Math.max(1, 1000 / maxSide));
+    const srcW = Math.round(r.w * srcScale), srcH = Math.round(r.h * srcScale);
+    const detScale = Math.min(opts.detMaxSide / Math.max(srcW, srcH), 2);
+    const src = rasterize(source, r, srcW, srcH);
+    const det = rasterize(source, r, roundTo32(srcW * detScale), roundTo32(srcH * detScale));
+    const res = await localEngine.run(det, src, opts);
+    lines = res.lines.map((l) => {
+      const quad = l.quad.map((p) => ({ x: r.x + p.x / srcScale, y: r.y + p.y / srcScale })) as OcrLine['quad'];
+      return { ...l, quad, box: quadBox(quad) };
+    });
+  }
+  return { lines, ms: performance.now() - t0 };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Optional cloud engine (Google Cloud Vision). Covers far more rare/extension-plane kanji, at the
+// cost of sending the image to Google. Requires the user's own API key.
+
+interface Vertex { x?: number; y?: number }
+interface VSymbol { text: string; confidence?: number; boundingBox?: { vertices: Vertex[] }; property?: { detectedBreak?: { type: string } } }
+
+async function cloudRecognize(source: CanvasImageSource & { width: number; height: number }, r: Rect, key: string): Promise<OcrLine[]> {
+  if (!key) throw new Error('Set a Google Cloud Vision API key in Settings to use the cloud engine.');
+  const scale = Math.min(1, 2400 / Math.max(r.w, r.h));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(r.w * scale);
+  canvas.height = Math.round(r.h * scale);
+  canvas.getContext('2d')!.drawImage(source, r.x, r.y, r.w, r.h, 0, 0, canvas.width, canvas.height);
+  const b64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+  const res = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${encodeURIComponent(key)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      requests: [{ image: { content: b64 }, features: [{ type: 'DOCUMENT_TEXT_DETECTION' }], imageContext: { languageHints: ['ja'] } }],
+    }),
+  });
+  const json = await res.json();
+  if (!res.ok || json.responses?.[0]?.error) throw new Error(json.error?.message ?? json.responses?.[0]?.error?.message ?? `HTTP ${res.status}`);
+  const pages = json.responses?.[0]?.fullTextAnnotation?.pages ?? [];
+  const lines: OcrLine[] = [];
+  let cur: VSymbol[] = [];
+  const flush = () => {
+    if (!cur.length) return;
+    const pts: Point[] = cur.flatMap((s) => (s.boundingBox?.vertices ?? []).map((v) => ({ x: r.x + (v.x ?? 0) / scale, y: r.y + (v.y ?? 0) / scale })));
+    const box = quadBox(pts.length ? pts : [{ x: r.x, y: r.y }]);
+    const first = center(cur[0]), last = center(cur[cur.length - 1]);
+    const vertical = cur.length > 1 ? Math.abs(last.y - first.y) > Math.abs(last.x - first.x) : box.h > box.w * 1.5;
+    const quad: OcrLine['quad'] = vertical
+      ? [{ x: box.x + box.w, y: box.y }, { x: box.x + box.w, y: box.y + box.h }, { x: box.x, y: box.y + box.h }, { x: box.x, y: box.y }]
+      : [{ x: box.x, y: box.y }, { x: box.x + box.w, y: box.y }, { x: box.x + box.w, y: box.y + box.h }, { x: box.x, y: box.y + box.h }];
+    const chars = cur.map((s) => ({ c: s.text.normalize('NFC'), p: s.confidence ?? 1 }));
+    lines.push({ text: chars.map((c) => c.c).join(''), chars, vertical, quad, box, score: 1 });
+    cur = [];
+  };
+  for (const page of pages)
+    for (const block of page.blocks ?? [])
+      for (const para of block.paragraphs ?? []) {
+        for (const word of para.words ?? [])
+          for (const sym of (word.symbols ?? []) as VSymbol[]) {
+            cur.push(sym);
+            const br = sym.property?.detectedBreak?.type;
+            if (br === 'LINE_BREAK' || br === 'EOL_SURE_SPACE') flush();
+            else if (br === 'SPACE' || br === 'SURE_SPACE') cur.push({ text: ' ', confidence: 1, boundingBox: sym.boundingBox });
+          }
+        flush();
+      }
+  return sortLines(lines);
+}
+
+function center(s: VSymbol): Point {
+  const v = s.boundingBox?.vertices ?? [];
+  const n = Math.max(v.length, 1);
+  return { x: v.reduce((a, p) => a + (p.x ?? 0), 0) / n, y: v.reduce((a, p) => a + (p.y ?? 0), 0) / n };
+}
