@@ -27,10 +27,7 @@ async function exists(p) {
 async function download({ url, file }) {
   const dest = join(cacheDir, file);
   if (await exists(dest)) return dest;
-  console.log(`Downloading ${url}`);
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
-  await writeFile(dest, Buffer.from(await res.arrayBuffer()));
+  await writeFile(dest, await fetchRetry(url));
   return dest;
 }
 
@@ -185,3 +182,20 @@ await writeFile(
   JSON.stringify({ version, files: { jmdict: { file: 'jmdict.json.gz', size: jm.length, count: entries.length }, kanjidic: { file: 'kanjidic.json.gz', size: kd.length, count: kanji.length } } }, null, 1),
 );
 console.log(`Wrote jmdict.json.gz (${(jm.length / 1e6).toFixed(1)} MB), kanjidic.json.gz (${(kd.length / 1e6).toFixed(1)} MB)`);
+
+/** fetch with retries and exponential backoff (CI networks occasionally time out). */
+async function fetchRetry(url, attempts = 5) {
+  for (let i = 1; ; i++) {
+    try {
+      console.log(`Downloading ${url}${i > 1 ? ` (attempt ${i})` : ''}`);
+      const res = await fetch(url, { signal: AbortSignal.timeout(300_000) });
+      if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+      return Buffer.from(await res.arrayBuffer());
+    } catch (e) {
+      if (i >= attempts) throw e;
+      const wait = 2000 * 2 ** (i - 1);
+      console.warn(`  failed (${e.cause?.code ?? e.message}); retrying in ${wait / 1000}s`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+}

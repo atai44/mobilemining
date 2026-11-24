@@ -22,10 +22,7 @@ async function exists(p) {
 
 async function fetchTo(url, dest) {
   if (await exists(dest)) return;
-  console.log(`Downloading ${url}`);
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
-  await writeFile(dest, Buffer.from(await res.arrayBuffer()));
+  await writeFile(dest, await fetchRetry(url));
 }
 
 await mkdir(modelsDir, { recursive: true });
@@ -45,3 +42,20 @@ for (const m of MODELS) {
 }
 
 console.log('Models ready.');
+
+/** fetch with retries and exponential backoff (CI networks occasionally time out). */
+async function fetchRetry(url, attempts = 5) {
+  for (let i = 1; ; i++) {
+    try {
+      console.log(`Downloading ${url}${i > 1 ? ` (attempt ${i})` : ''}`);
+      const res = await fetch(url, { signal: AbortSignal.timeout(300_000) });
+      if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+      return Buffer.from(await res.arrayBuffer());
+    } catch (e) {
+      if (i >= attempts) throw e;
+      const wait = 2000 * 2 ** (i - 1);
+      console.warn(`  failed (${e.cause?.code ?? e.message}); retrying in ${wait / 1000}s`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+}
