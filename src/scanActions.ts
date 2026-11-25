@@ -1,5 +1,5 @@
 import { localEngine, recognize, type Rect } from './lib/ocr/client';
-import { scan, settings, view, ocrState, showToast, textFromLines, trimLine, type Scan } from './store';
+import { charCells, scan, settings, view, ocrState, showToast, textFromLines, trimLine, type Scan } from './store';
 import type { OcrLine, Orientation, Point } from './lib/ocr/types';
 import { processFurigana } from './lib/ocr/ruby';
 import { arrange, type LaidOutLine } from './lib/ocr/layout';
@@ -214,10 +214,18 @@ export function rebuild() {
   const sess = page.session;
   const fromSession = sess ? sess.lines.filter((l) => l.result && !page.replaced.has(l.key)).map((l) => l.result!) : [];
   let all = [...fromSession, ...page.extra].filter((l) => !page.deleted.has(l.key!));
-  // A box that has been read owns everything inside it: cut its characters out of other lines.
+  // A box that has been read owns the characters it read: other lines lose the characters lying
+  // on one of them. (Deciding by the box's own reading means a character on the box's edge ends
+  // up in exactly one place, never in both and never in neither.)
   for (const a of page.areas) {
     const own = page.areaReads.get(a.id);
-    if (own) all = all.flatMap((l) => (own.has(l.key!) ? [l] : trimLine(l, (c) => !inArea(a, c))));
+    if (!own) continue;
+    const cells = all.filter((l) => own.has(l.key!)).flatMap((l) => charCells(l).map((c) => [0, 2, 4, 6].map((i) => ({ x: c[i], y: c[i + 1] }))));
+    if (!cells.length) continue;
+    const xs = cells.flat().map((p) => p.x), ys = cells.flat().map((p) => p.y);
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const taken = (c: Point) => c.x >= x0 && c.x <= x1 && c.y >= y0 && c.y <= y1 && cells.some((q) => pointInQuad(c, q));
+    all = all.flatMap((l) => (own.has(l.key!) ? [l] : trimLine(l, (c) => !taken(c))));
   }
   const processed = checkRuby(processFurigana(all, settings.value.display.furigana));
   let lines = arrange(processed, withPieces(page.sections, processed));
