@@ -76,6 +76,27 @@ uploaded unless you turn on the optional cloud OCR engine. After the first load 
     duplicate notes. Without a loaded note type the built-in `MobileMining` type is used.
   - **Export → TSV**: text only, for Anki's File → Import.
 
+## Android app
+
+The same app as an APK, with one thing a web page can't do: **adding cards straight into AnkiDroid** through its
+API — your own note type and deck, every field, the photo, dictionary images and pronunciation audio, with duplicate
+checks. No AnkiConnect, no import step.
+
+- **Get it**: `mobilemining.apk` from the site (`<site>/mobilemining.apk`) or from the repository's Releases; every
+  push to `main` builds a new one (they install over each other). It is sideloaded, so Android asks to allow installs
+  from the browser, and may ask you to confirm an app from an unverified developer.
+- **Setup**: install AnkiDroid first and open it once. In the app: *Settings → Anki → AnkiDroid → Connect* (Android
+  shows AnkiDroid's permission prompt), then pick the deck and note type, or import your Yomitan settings. If no
+  prompt appears, reinstall the app: Android only grants AnkiDroid's permission to apps installed after AnkiDroid.
+- Everything else is the web app: OCR models and the dictionary are inside the APK (nothing to download), data
+  stays on the device, and backups from the web version can be restored in the app.
+- Files the app creates (backup, `.apkg`, TSV) are handed to Android's share sheet.
+
+Building it yourself: `npm run build && npx cap sync android && (cd android && ./gradlew assembleRelease)` with JDK 21
+and the Android SDK. The native part is small: `android/app/src/main/java/.../AnkiDroidPlugin.java` (AnkiDroid's API)
+and `src/lib/native.ts` (its JavaScript side). The APK is signed with `android/app/sideload.keystore`, a key kept in
+the repository so that every build can update an installed copy; replace it with your own for anything public.
+
 ## Running it
 
 ```bash
@@ -131,6 +152,7 @@ npm run build && npm run e2e   # headless Chromium: dictionary install, OCR of h
 | `src/lib/ocr/session.ts` | Progressive OCR: detect once, recognize line by line with tap priority |
 | `src/lib/ocr/layout.ts` | Blocks and reading order for pages that mix horizontal and vertical text |
 | `src/lib/pdf.ts` | PDF rendering and text-layer extraction (pdf.js, loaded on demand) |
+| `src/lib/native.ts`, `android/` | Android app (Capacitor): AnkiDroid API plugin, native audio download, file sharing |
 | `scripts/` | Model download and dictionary build |
 
 ## Licenses and data

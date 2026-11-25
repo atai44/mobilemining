@@ -47,7 +47,8 @@ body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
 a { color: var(--accent); }
 code { font-size: 0.9em; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; word-break: break-all; }
 
-.app { display: flex; flex-direction: column; height: 100%; }
+/* Top inset: the Android app draws under the status bar (edge-to-edge). */
+.app { display: flex; flex-direction: column; height: 100%; padding-top: env(safe-area-inset-top, 0px); }
 .main { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .page { flex: 1; overflow-y: auto; padding: 16px 16px calc(var(--tabs-h) + 16px); max-width: 720px; width: 100%; margin: 0 auto; }
 .page.center { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
