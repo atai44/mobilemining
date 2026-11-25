@@ -2,6 +2,16 @@ import type { Orientation } from './ocr/types';
 
 export type AnkiMethod = 'ankiconnect' | 'ankimobile' | 'local';
 export type ImageMode = 'page' | 'line' | 'none';
+export type FuriganaMode = 'ruby' | 'remove' | 'keep';
+export type DuplicateBehavior = 'prevent' | 'new' | 'overwrite';
+
+export const BUILTIN_JMDICT = 'JMdict (built-in)';
+export const BUILTIN_KANJIDIC = 'KANJIDIC2 (built-in)';
+
+export interface DictionarySetting {
+  name: string;
+  enabled: boolean;
+}
 
 export interface Settings {
   ocr: {
@@ -17,7 +27,11 @@ export interface Settings {
     vertical: boolean;
     highlightLowConfidence: boolean;
     hardLineBreaks: boolean;
+    /** What to do with furigana detected in photos: show as ruby, drop, or keep as separate lines. */
+    furigana: FuriganaMode;
   };
+  /** Dictionaries in priority order (built-in and imported). */
+  dictionaries: DictionarySetting[];
   anki: {
     method: AnkiMethod;
     url: string;
@@ -26,7 +40,14 @@ export interface Settings {
     model: string;
     fields: Record<string, string>;
     tags: string;
-    allowDuplicates: boolean;
+    /** Yomitan semantics: prevent adding, add a new note anyway, or overwrite the existing note's fields. */
+    duplicateBehavior: DuplicateBehavior;
+    duplicateScope: 'collection' | 'deck' | 'deck-root';
+    checkForDuplicates: boolean;
+    /** Add with one tap from the popup (✎ opens the editor). Off: always open the editor. */
+    quickAdd: boolean;
+    /** How "view note" opens it in Anki: card browser or note editor. */
+    noteGuiMode: 'browse' | 'edit';
     image: ImageMode;
     audio: boolean;
     mobile: { profile: string; deck: string; model: string; fields: Record<string, string> };
@@ -35,7 +56,11 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   ocr: { engine: 'local', orientation: 'auto', detMaxSide: 1536, boxThresh: 0.5, unclipRatio: 1.5, cloudApiKey: '' },
-  display: { fontSize: 22, vertical: false, highlightLowConfidence: true, hardLineBreaks: false },
+  display: { fontSize: 22, vertical: false, highlightLowConfidence: true, hardLineBreaks: false, furigana: 'ruby' },
+  dictionaries: [
+    { name: BUILTIN_JMDICT, enabled: true },
+    { name: BUILTIN_KANJIDIC, enabled: true },
+  ],
   anki: {
     method: 'local',
     url: 'http://127.0.0.1:8765',
@@ -44,14 +69,18 @@ export const DEFAULT_SETTINGS: Settings = {
     model: '',
     fields: {},
     tags: 'mobilemining',
-    allowDuplicates: false,
+    duplicateBehavior: 'new',
+    duplicateScope: 'collection',
+    checkForDuplicates: true,
+    quickAdd: true,
+    noteGuiMode: 'browse',
     image: 'page',
     audio: true,
     mobile: {
       profile: 'User 1',
       deck: 'Default',
       model: 'Basic',
-      fields: { Front: '{sentence}', Back: '{furigana-html}<br>{glossary}' },
+      fields: { Front: '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}', Back: '{furigana}<br>{glossary}' },
     },
   },
 };
@@ -71,7 +100,15 @@ function merge<T>(base: T, over: unknown): T {
 export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return merge(DEFAULT_SETTINGS, JSON.parse(raw));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // v1 -> v2: allowDuplicates became duplicateBehavior
+      if (parsed?.anki && 'allowDuplicates' in parsed.anki) {
+        parsed.anki.duplicateBehavior ??= parsed.anki.allowDuplicates ? 'new' : 'prevent';
+        delete parsed.anki.allowDuplicates;
+      }
+      return merge(DEFAULT_SETTINGS, parsed);
+    }
   } catch { /* ignore */ }
   return structuredClone(DEFAULT_SETTINGS);
 }
@@ -80,4 +117,12 @@ export function saveSettings(s: Settings) {
   try {
     localStorage.setItem(KEY, JSON.stringify(s));
   } catch { /* storage may be unavailable */ }
+}
+
+/** Merges installed dictionary titles into the ordered settings list (new ones go last, enabled). */
+export function syncDictionaryList(list: DictionarySetting[], installed: string[]): DictionarySetting[] {
+  const all = new Set([BUILTIN_JMDICT, BUILTIN_KANJIDIC, ...installed]);
+  const out = list.filter((d) => all.has(d.name));
+  for (const name of all) if (!out.some((d) => d.name === name)) out.push({ name, enabled: true });
+  return out;
 }

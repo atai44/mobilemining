@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { deleteNote, listNotes, saveNote, type MinedNote } from '../lib/db';
-import { notesToTsv, sendToAnkiConnect } from '../lib/anki';
+import { notesToTsv, sendToAnkiConnect, viewNote } from '../lib/anki';
 import { settings, showToast } from '../store';
 
 export function NotesView() {
@@ -14,7 +14,7 @@ export function NotesView() {
 
   const send = async (n: MinedNote) => {
     try {
-      n.ankiNoteId = await sendToAnkiConnect(st, n);
+      n.ankiNoteId = (await sendToAnkiConnect(st, n)).noteId;
       n.status = 'added';
       n.error = undefined;
     } catch (e) {
@@ -58,14 +58,14 @@ export function NotesView() {
       {!notes.length && <p class="muted center">Cards you mine appear here.</p>}
       <ul class="note-list">
         {notes.map((n) => (
-          <NoteItem key={n.id} n={n} canSend={canSend} onSend={async () => { await send(n); reload(); }} onDelete={async () => { await deleteNote(n.id!); reload(); }} />
+          <NoteItem key={n.id} n={n} canSend={canSend} onView={n.ankiNoteId && canSend ? () => viewNote(st, n.ankiNoteId!).catch((e) => showToast(String(e.message ?? e), 'error')) : undefined} onSend={async () => { await send(n); reload(); }} onDelete={async () => { await deleteNote(n.id!); reload(); }} />
         ))}
       </ul>
     </div>
   );
 }
 
-function NoteItem({ n, canSend, onSend, onDelete }: { n: MinedNote; canSend: boolean; onSend: () => void; onDelete: () => void }) {
+function NoteItem({ n, canSend, onSend, onDelete, onView }: { n: MinedNote; canSend: boolean; onSend: () => void; onDelete: () => void; onView?: () => void }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!n.image) return;
@@ -78,14 +78,15 @@ function NoteItem({ n, canSend, onSend, onDelete }: { n: MinedNote; canSend: boo
       {url && <img src={url} alt="" class="note-thumb" />}
       <div class="note-body">
         <div class="note-word" lang="ja">
-          <span dangerouslySetInnerHTML={{ __html: n.fields['furigana-html'] ?? n.fields.expression }} />
+          <span dangerouslySetInnerHTML={{ __html: n.fields.furigana ?? n.fields['furigana-html'] ?? n.fields.expression }} />
           <span class={`badge ${n.status === 'added' ? 'ok' : n.status === 'error' ? 'err' : ''}`}>{n.status === 'added' ? 'in Anki' : n.status === 'error' ? 'failed' : 'saved'}</span>
         </div>
-        <div class="note-sentence" lang="ja" dangerouslySetInnerHTML={{ __html: n.fields.sentence }} />
-        <div class="muted small">{n.fields['glossary-brief']}</div>
+        <div class="note-sentence" lang="ja" dangerouslySetInnerHTML={{ __html: n.fields['sentence-bold'] ?? n.fields.sentence }} />
+        <div class="muted small">{(n.fields['glossary-plain-no-dictionary'] ?? n.fields['glossary-brief'] ?? '').split('\n')[0].replace(/<[^>]+>/g, ' ').slice(0, 140)}</div>
         {n.error && <div class="error small">{n.error}</div>}
         <div class="row">
           {canSend && n.status !== 'added' && <button class="button small" onClick={onSend}>Send</button>}
+          {onView && <button class="button small" onClick={onView}>View in Anki</button>}
           <button class="button small danger" onClick={() => confirm('Delete this card?') && onDelete()}>Delete</button>
         </div>
       </div>

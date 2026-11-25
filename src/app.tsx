@@ -1,5 +1,6 @@
 import { useEffect } from 'preact/hooks';
 import { view, toast, refreshDicts, scan, type View } from './store';
+import { refreshDictionaries } from './dictionaries';
 import { CaptureView } from './components/CaptureView';
 import { ScanView } from './components/ScanView';
 import { NotesView } from './components/NotesView';
@@ -15,6 +16,7 @@ const TABS: { id: View; label: string; icon: string }[] = [
 export function App() {
   useEffect(() => {
     refreshDicts();
+    refreshDictionaries().catch((e) => console.error(e));
     // Persisted storage keeps the dictionary from being evicted on mobile browsers.
     navigator.storage?.persist?.().catch(() => {});
   }, []);

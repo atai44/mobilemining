@@ -16,16 +16,27 @@ uploaded unless you turn on the optional cloud OCR engine. After the first load 
   - Every character keeps the model's runner-up guesses. Tap a misread character and pick the right one, or edit the text directly.
   - Drag a box to OCR a specific area (best for small text). Rotate, zoom, and force horizontal or vertical.
   - Optional **Google Cloud Vision** engine (your own API key) for even wider character coverage.
+- **Furigana in photos** is recognized as furigana. It never gets spliced between lines of text. You can show it as ruby
+  over the right kanji, remove it, or keep it. It's also available on cards as `{sentence-furigana}`.
 - **Pop-up dictionary** like Yomitan:
   - Longest-match scanning from the tapped character.
   - A deinflector for verbs and adjectives (食べさせられなかった → 食べる, with the chain shown).
-  - JMdict (~220k entries) with furigana, part-of-speech tags, and a "common" marker.
-  - KANJIDIC2 kanji cards (tap a kanji in the headword), and pronunciation audio.
-- **Anki**:
-  - **AnkiConnect**: desktop Anki, or AnkiDroid with the *AnkiConnect Android* app. Fields are mapped with markers
-    (`{expression}`, `{reading}`, `{furigana}`, `{glossary}`, `{sentence}`, `{cloze-body}`, `{image}`, `{audio}`, …),
-    with automatic guesses from field names. Images are uploaded, audio is attached, and the "+" button shows ✓ when
-    the word is already in your deck.
+  - Built-in JMdict (~220k entries) and KANJIDIC2 (~13k kanji) kanji cards, plus audio.
+  - **Import your own Yomitan dictionaries** (`.zip`): term dictionaries such as Jitendex, frequency lists (JPDB, …),
+    pitch-accent and kanji dictionaries.
+    - Structured content, images and `styles.css` render as they do in Yomitan, and dictionary links open nested lookups.
+    - Results from all enabled dictionaries are merged per word in your priority order, and sorted by frequency.
+- **Anki**, modelled on Yomitan + AnkiConnect:
+  - **AnkiConnect**: desktop Anki, or AnkiDroid with the *AnkiConnect Android* app.
+    - Connects automatically and shows its status.
+    - One tap on ＋ adds the card; ✎ opens an editor first; 📖 opens the note in Anki.
+    - Duplicate check with Yomitan's *prevent / add new / overwrite* behaviors and scopes.
+    - **Same field markers as Yomitan**, including `{single-glossary-<dict>}`. Typical Lapis, Kiku and JPMN fields are
+      mapped automatically.
+    - "Set up note type & deck for me" creates a ready-made `MobileMining` note type.
+  - **Import from Yomitan**: load a Yomitan settings backup (*Settings → Backup → Export Settings*) to bring over your
+    AnkiConnect server and key, deck, note type, field markers, tags, duplicate options, and dictionary order. Custom
+    Handlebars templates are not supported; standard markers are.
   - **AnkiMobile (iOS)**: fills AnkiMobile's Add screen through its `anki://x-callback-url/addnote` link.
   - **Save & export**: every mined card is kept on the device and can be exported as TSV (Anki: File → Import).
 
@@ -60,8 +71,9 @@ send or export them later.
 
 ```bash
 npm test                       # unit tests: deinflection, furigana, lookup ranking, sentence extraction
-npm run build && npm run e2e   # headless Chromium: dictionary install, OCR of horizontal/vertical/rotated pages,
-                               # lookup, and mining against a mocked AnkiConnect
+npm run build && npm run e2e   # headless Chromium: dictionary install, OCR of horizontal/vertical/rotated pages and
+                               # pages with furigana, Yomitan dictionary + settings import, lookup, and mining
+                               # against a mocked AnkiConnect
 ```
 
 ## Project layout
@@ -73,7 +85,9 @@ npm run build && npm run e2e   # headless Chromium: dictionary install, OCR of h
 | `src/lib/deinflect.ts` | Japanese deinflection rules |
 | `src/lib/lookup.ts` | Yomitan-style scanning and ranking; sentence extraction |
 | `src/lib/db.ts` | IndexedDB: dictionary install, lookups, mined cards |
-| `src/lib/anki.ts` | AnkiConnect / AnkiMobile / TSV, field markers |
+| `src/lib/anki.ts` | AnkiConnect / AnkiMobile / TSV, Yomitan-compatible field markers, duplicates |
+| `src/lib/yomitan/` | Yomitan dictionary import, structured-content rendering, settings import |
+| `src/lib/ocr/ruby.ts` | Furigana detection and attachment |
 | `scripts/` | Model download and dictionary build |
 
 ## Licenses and data

@@ -230,3 +230,47 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
   .scan { flex-direction: row; }
   .image-panel { flex: 0 0 50%; border-bottom: 0; border-right: 1px solid var(--border); }
 }
+
+/* --- Imported dictionaries / Anki v2 ------------------------------------------ */
+.popup-nav { display: flex; gap: 8px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+.dict-block { margin-top: 6px; }
+.dict-name { font-size: 0.72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 6px 0 2px; }
+.senses.imported.single { list-style: none; padding-left: 0; }
+.gloss-list { margin: 2px 0; padding-left: 1.2em; }
+.gloss-sc-table-container { overflow-x: auto; }
+.gloss-sc-table { border-collapse: collapse; font-size: 0.9em; }
+.gloss-sc-td, .gloss-sc-th { border: 1px solid var(--border); padding: 2px 6px; }
+.gloss-sc-ul, .gloss-sc-ol { padding-left: 1.2em; margin: 2px 0; }
+.gloss-image { max-width: 100%; height: auto; vertical-align: middle; }
+.gloss-link { color: var(--accent); }
+.gloss-deinflection { color: var(--muted); font-style: italic; }
+.tag.freq { background: var(--surface-2); color: var(--text); font-weight: 500; }
+.tag.freq b { color: var(--muted); font-weight: 700; }
+.pitches { display: flex; flex-wrap: wrap; gap: 10px; font-size: 0.95rem; margin-top: 2px; }
+.pitch-item { display: inline-flex; gap: 4px; align-items: baseline; }
+.pitch-num { color: var(--muted); font-size: 0.8em; }
+.icon-button.mine.done { background: var(--surface-2); border-color: var(--border); color: var(--ok); }
+.icon-button:disabled { opacity: 0.6; }
+.icon-button.small { width: 32px; height: 32px; font-size: 0.9rem; }
+.icon-button.danger { color: var(--err); }
+.ykanji { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 4px; }
+.dict-list { list-style: none; padding: 0; margin: 8px 0 12px; }
+.dict-row { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.dict-row.disabled .dict-info { opacity: 0.5; }
+.dict-info { flex: 1; min-width: 0; }
+.dict-title { font-weight: 600; overflow-wrap: anywhere; }
+.dict-actions { display: flex; gap: 4px; }
+.conn { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); font-size: 0.9rem; margin: 8px 0; }
+.conn span:nth-child(2) { flex: 1; }
+.conn .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+.conn-ok .dot { background: var(--ok); }
+.conn-error .dot { background: var(--err); }
+.conn-checking .dot { background: var(--accent); }
+.help ol { padding-left: 1.2em; margin: 6px 0; }
+.setup-box { border: 1px dashed var(--accent); border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+.setup-box p { margin: 0 0 8px; }
+.yomitan-import { margin: 4px 0 12px; }
+.import-summary { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); }
+.import-summary .warn { color: var(--accent); }
+.dupe-note { color: var(--accent); }
+.reader ruby rt { font-size: 0.5em; color: var(--muted); user-select: none; }

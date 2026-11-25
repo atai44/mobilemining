@@ -15,6 +15,8 @@ export interface Scan {
   meta: (OcrChar | null)[];
   /** Index into `lines` for each code point (-1 when unknown). */
   lineOf: number[];
+  /** Furigana read from the photo, as code-point ranges of `text`. */
+  ruby: { start: number; end: number; text: string }[];
   busy: boolean;
   error: string | null;
   timing?: number;
@@ -52,16 +54,21 @@ export async function refreshDicts() {
   }
 }
 
-export function textFromLines(lines: OcrLine[]): Pick<Scan, 'text' | 'meta' | 'lineOf'> {
+export function textFromLines(lines: OcrLine[]): Pick<Scan, 'text' | 'meta' | 'lineOf' | 'ruby'> {
   const text: string[] = [];
   const meta: (OcrChar | null)[] = [];
   const lineOf: number[] = [];
+  const ruby: Scan['ruby'] = [];
   lines.forEach((l, li) => {
     if (li > 0) { text.push('\n'); meta.push(null); lineOf.push(-1); }
+    const charStart: number[] = [];
     for (const c of l.chars) {
+      charStart.push(text.length);
       // A recognized "character" may be multiple code points only for unusual symbols; keep 1:1.
       for (const cp of Array.from(c.c)) { text.push(cp); meta.push(c); lineOf.push(li); }
     }
+    charStart.push(text.length);
+    for (const r of l.ruby ?? []) ruby.push({ start: charStart[r.from], end: charStart[r.to], text: r.text });
   });
-  return { text, meta, lineOf };
+  return { text, meta, lineOf, ruby };
 }

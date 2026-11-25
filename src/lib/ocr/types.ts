@@ -8,7 +8,12 @@ export interface OcrChar {
   c: string;
   p: number; // confidence 0..1
   alts?: { c: string; p: number }[]; // other likely characters for this position
+  /** Position of the character's centre along its line, 0 (start) .. 1 (end). */
+  u?: number;
 }
+
+/** Furigana attached to characters [from, to) of a line. */
+export interface Ruby { from: number; to: number; text: string }
 
 export interface Point { x: number; y: number }
 
@@ -21,6 +26,7 @@ export interface OcrLine {
   /** Axis-aligned bounding box in source-image pixels. */
   box: { x: number; y: number; w: number; h: number };
   score: number;
+  ruby?: Ruby[];
 }
 
 export type Orientation = 'auto' | 'horizontal' | 'vertical';

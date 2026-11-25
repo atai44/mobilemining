@@ -406,7 +406,8 @@ export async function runOcr(
     const out = await runRec(strip);
     let decoded = ctcDecode(out, dict);
     if (g.vertical && decoded.length) decoded = await restoreVerticalMarks(strip, out.dims[1], decoded, runRec, dict);
-    const chars: OcrChar[] = decoded.map(({ t: _t, ...c }) => c);
+    const T = out.dims[1];
+    const chars: OcrChar[] = decoded.map(({ t, ...c }) => ({ ...c, u: (t + 0.5) / T }));
     if (!chars.length) continue;
     lines.push({ text: chars.map((c) => c.c).join(''), chars, vertical: g.vertical, quad: g.quad, box: quadBox(g.quad), score: g.score });
   }

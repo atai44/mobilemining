@@ -1,0 +1,82 @@
+{
+ "version": 24,
+ "profileCurrent": 0,
+ "global": {},
+ "profiles": [
+  {
+   "name": "Default",
+   "conditionGroups": [],
+   "options": {
+    "anki": {
+     "enable": true,
+     "server": "http://127.0.0.1:8765",
+     "apiKey": "",
+     "tags": [
+      "yomitan"
+     ],
+     "duplicateBehavior": "new",
+     "duplicateScope": "collection",
+     "checkForDuplicates": true,
+     "fieldTemplates": null,
+     "cardFormats": [
+      {
+       "name": "Expression",
+       "icon": "big-circle",
+       "type": "term",
+       "deck": "Mining",
+       "model": "Lapis",
+       "fields": {
+        "Expression": {
+         "value": "{expression}",
+         "overwriteMode": "coalesce"
+        },
+        "ExpressionFurigana": {
+         "value": "{furigana-plain}",
+         "overwriteMode": "coalesce"
+        },
+        "MainDefinition": {
+         "value": "{single-glossary-test-dict}",
+         "overwriteMode": "coalesce"
+        },
+        "Sentence": {
+         "value": "{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}",
+         "overwriteMode": "coalesce"
+        },
+        "SentenceFurigana": {
+         "value": "{sentence-furigana-plain}",
+         "overwriteMode": "coalesce"
+        },
+        "PitchPosition": {
+         "value": "{pitch-accent-positions}",
+         "overwriteMode": "coalesce"
+        },
+        "FreqSort": {
+         "value": "{frequency-harmonic-rank}",
+         "overwriteMode": "coalesce"
+        },
+        "Picture": {
+         "value": "{screenshot}",
+         "overwriteMode": "coalesce"
+        }
+       }
+      }
+     ]
+    },
+    "dictionaries": [
+     {
+      "name": "Test Dict",
+      "enabled": true
+     },
+     {
+      "name": "Test Freq",
+      "enabled": true
+     },
+     {
+      "name": "Jitendex",
+      "enabled": true
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -1,6 +1,7 @@
 import { localEngine, recognize, type Rect } from './lib/ocr/client';
 import { scan, settings, view, ocrState, showToast, textFromLines, type Scan } from './store';
 import type { OcrLine } from './lib/ocr/types';
+import { processFurigana } from './lib/ocr/ruby';
 
 const MAX_SIDE = 3000;
 
@@ -61,7 +62,7 @@ export async function openImage(blob: Blob, source = '') {
   const canvas = await toCanvas(blob);
   const url = await canvasUrl(canvas);
   if (scan.value?.url) URL.revokeObjectURL(scan.value.url);
-  scan.value = { canvas, url, lines: [], text: [], meta: [], lineOf: [], busy: false, error: null, source };
+  scan.value = { canvas, url, lines: [], text: [], meta: [], lineOf: [], ruby: [], busy: false, error: null, source };
   view.value = 'scan';
   await runOcr(null);
 }
@@ -69,7 +70,7 @@ export async function openImage(blob: Blob, source = '') {
 export function openText(text: string, source = '') {
   if (scan.value?.url) URL.revokeObjectURL(scan.value.url);
   const cps = Array.from(text.normalize('NFC'));
-  scan.value = { canvas: null, url: null, lines: [], text: cps, meta: cps.map(() => null), lineOf: cps.map(() => -1), busy: false, error: null, source };
+  scan.value = { canvas: null, url: null, lines: [], text: cps, meta: cps.map(() => null), lineOf: cps.map(() => -1), ruby: [], busy: false, error: null, source };
   view.value = 'scan';
 }
 
@@ -80,7 +81,9 @@ export async function runOcr(rect: Rect | null) {
   try {
     await ensureOcrEngine();
     const o = settings.value.ocr;
-    const { lines, ms } = await recognize(s.canvas, rect, { ...o, engine: o.engine, cloudApiKey: o.cloudApiKey });
+    const res = await recognize(s.canvas, rect, { ...o, engine: o.engine, cloudApiKey: o.cloudApiKey });
+    const ms = res.ms;
+    const lines = processFurigana(res.lines, settings.value.display.furigana);
     setScan({ lines, ...textFromLines(lines), busy: false, timing: ms });
     if (!lines.length) showToast('No text found. Try selecting the text area or retaking the photo closer.', 'info');
   } catch (e) {
@@ -101,7 +104,7 @@ export async function rotateScan() {
   ctx.rotate(Math.PI / 2);
   ctx.drawImage(s.canvas, 0, 0);
   if (s.url) URL.revokeObjectURL(s.url);
-  scan.value = { ...s, canvas: c, url: await canvasUrl(c), lines: [], text: [], meta: [], lineOf: [] };
+  scan.value = { ...s, canvas: c, url: await canvasUrl(c), lines: [], text: [], meta: [], lineOf: [], ruby: [] };
   await runOcr(null);
 }
 

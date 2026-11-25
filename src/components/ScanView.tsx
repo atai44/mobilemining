@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { scan, settings, updateSettings, view, showToast } from '../store';
 import { runOcr, rotateScan } from '../scanActions';
-import { findTerms, type TermResult } from '../lib/lookup';
-import { lookupKeys } from '../lib/db';
+import type { TermResult } from '../lib/lookup';
+import { lookupAt as dictLookup } from '../dictionaries';
 import type { Rect } from '../lib/ocr/client';
 import type { Orientation } from '../lib/ocr/types';
 import { Popup } from './Popup';
@@ -29,7 +29,7 @@ export function ScanView() {
 
   const lookupAt = async (index: number, anchor: DOMRect) => {
     try {
-      const results = await findTerms(scan.value!.text, index, lookupKeys);
+      const results = await dictLookup(scan.value!.text, index);
       setPopup({ index, results, anchor });
     } catch (e) {
       showToast(String((e as Error).message ?? e), 'error');
@@ -65,7 +65,7 @@ export function ScanView() {
             const el = textRef.current?.querySelector(`[data-i="${popup.index}"]`);
             lookupAt(popup.index, el?.getBoundingClientRect() ?? popup.anchor);
           }}
-          onMine={(r) => setMine({ result: r, index: popup.index })}
+          onEdit={(r) => setMine({ result: r, index: popup.index })}
         />
       )}
       {mine && <MineSheet req={mine} onClose={() => setMine(null)} />}
@@ -207,6 +207,7 @@ function TextPanel({
     out.push(cur);
     return out;
   }, [s.text, s.lineOf]);
+  const rubyAt = useMemo(() => new Map(s.ruby.map((r) => [r.start, r])), [s.ruby]);
 
   const onClick = (e: MouseEvent) => {
     const el = (e.target as HTMLElement).closest('[data-i]') as HTMLElement | null;
@@ -216,7 +217,7 @@ function TextPanel({
 
   const saveEdit = () => {
     const cps = Array.from(draft.normalize('NFC'));
-    scan.value = { ...s, text: cps, meta: cps.map(() => null), lineOf: cps.map(() => -1) };
+    scan.value = { ...s, text: cps, meta: cps.map(() => null), lineOf: cps.map(() => -1), ruby: [] };
     setEditing(false);
   };
 
@@ -265,21 +266,38 @@ function TextPanel({
           {empty && s.busy && <p class="muted small placeholder">Reading text…</p>}
           {lines.map((ln) => (
             <p class={`line ${ln.chars.length ? '' : 'blank'}`} data-line={ln.li} key={ln.start}>
-              {ln.chars.map((c, j) => {
-                const i = ln.start + j;
+              {renderLine(ln.start, ln.chars.length, (i) => {
                 const m = s.meta[i];
                 const low = d.highlightLowConfidence && m && m.p < 0.7;
                 const inHl = highlight && i >= highlight.start && i < highlight.end;
                 return (
                   <span key={i} data-i={i} class={`${low ? 'low' : ''}${inHl ? ' hl' : ''}`}>
-                    {c}
+                    {s.text[i]}
                   </span>
                 );
-              })}
+              }, rubyAt)}
             </p>
           ))}
         </div>
       )}
     </section>
   );
+}
+
+/** Renders characters [start, start+len), wrapping furigana ranges in <ruby>. */
+function renderLine(start: number, len: number, char: (i: number) => preact.JSX.Element, rubyAt: Map<number, { start: number; end: number; text: string }>) {
+  const out: preact.JSX.Element[] = [];
+  for (let i = start; i < start + len; ) {
+    const r = rubyAt.get(i);
+    if (r && r.end <= start + len) {
+      const inner: preact.JSX.Element[] = [];
+      for (let k = r.start; k < r.end; k++) inner.push(char(k));
+      out.push(<ruby key={`r${i}`}>{inner}<rt>{r.text}</rt></ruby>);
+      i = r.end;
+    } else {
+      out.push(char(i));
+      i++;
+    }
+  }
+  return out;
 }

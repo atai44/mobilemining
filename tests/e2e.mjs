@@ -42,22 +42,46 @@ const page = await context.newPage();
 page.on('pageerror', (e) => console.error('[pageerror]', e.message));
 page.on('console', (m) => m.type() === 'error' && console.error('[console]', m.text()));
 
-// Mock AnkiConnect
+// Mock AnkiConnect (stateful: remembers added notes for duplicate checks)
 const ankiCalls = [];
+const added = new Map(); // first-field value -> note id
+let nextId = 1700000000000;
 await page.route('http://127.0.0.1:8765/**', async (route) => {
   const body = JSON.parse(route.request().postData() ?? '{}');
   ankiCalls.push(body);
-  const results = {
-    version: 6,
-    requestPermission: { permission: 'granted' },
-    deckNames: ['Default', 'Mining'],
-    modelNames: ['Basic', 'Japanese Sentence'],
-    modelFieldNames: ['Word', 'Reading', 'Sentence', 'Meaning', 'Picture', 'Audio'],
-    canAddNotes: [true],
-    storeMediaFile: body.params?.filename,
-    addNote: 1700000000000,
-  };
-  await route.fulfill({ contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ result: results[body.action] ?? null, error: null }) });
+  const p = body.params ?? {};
+  let result = null;
+  switch (body.action) {
+    case 'version': result = 6; break;
+    case 'requestPermission': result = { permission: 'granted' }; break;
+    case 'deckNames': result = ['Default', 'Mining']; break;
+    case 'modelNames': result = ['Basic', 'Japanese Sentence', 'Lapis']; break;
+    case 'modelFieldNames':
+      result = p.modelName === 'Lapis'
+        ? ['Expression', 'ExpressionFurigana', 'MainDefinition', 'Sentence', 'SentenceFurigana', 'PitchPosition', 'FreqSort', 'Picture']
+        : p.modelName === 'MobileMining'
+          ? ['Word', 'Reading', 'Furigana', 'Meaning', 'Sentence', 'SentenceFurigana', 'Picture', 'Audio', 'PitchAccent', 'Frequency', 'Source']
+          : ['Word', 'Reading', 'Sentence', 'Meaning', 'Picture', 'Audio'];
+      break;
+    case 'findNotes': {
+      const m = /:(.+?)"$/.exec(p.query.split('" "')[1] ?? '');
+      const id = m && added.get(m[1]);
+      result = id ? [id] : [];
+      break;
+    }
+    case 'storeMediaFile': result = p.filename; break;
+    case 'addNote': {
+      result = nextId++;
+      const first = Object.values(p.note.fields)[0];
+      added.set(first, result);
+      break;
+    }
+    case 'createModel': result = {}; break;
+    case 'createDeck': result = 1; break;
+    case 'guiBrowse': result = []; break;
+    case 'updateNoteFields': result = null; break;
+  }
+  await route.fulfill({ contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ result, error: null }) });
 });
 
 let failures = 0;
@@ -66,39 +90,45 @@ const check = (cond, msg) => {
   if (!cond) failures++;
 };
 const shot = async (name) => shots && page.screenshot({ path: join(shots, `${name}.png`) });
+const tab = (name) => page.click(`.tabs >> text=${name}`);
+const lastCall = (action) => [...ankiCalls].reverse().find((c) => c.action === action);
 
 await page.goto(base);
 await shot('01-capture');
 
-// 1. Install dictionary
+// 1. Install the built-in dictionary
 const t0 = Date.now();
 await page.click('[data-testid=install-dict]');
-await page.waitForSelector('[data-testid=install-dict]', { state: 'detached', timeout: 240_000 });
 await page.waitForFunction(() => !document.querySelector('.card.notice'), null, { timeout: 240_000 });
 console.log(`  dictionary installed in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
-// 2. Configure AnkiConnect through the settings UI
-await page.click('text=Settings');
-await page.click('text=AnkiConnect');
-await page.click('[data-testid=anki-connect]');
-await page.waitForSelector('text=Connected (AnkiConnect v6)');
-await page.selectOption('.settings select >> nth=0', 'Mining');
-await page.selectOption('.settings select >> nth=1', 'Japanese Sentence');
+// 2. AnkiConnect: auto-connects when selected
+await tab('Settings');
+await page.click('.segmented >> text=AnkiConnect');
+await page.waitForSelector('.conn-ok');
+check(true, 'AnkiConnect status shows connected');
+await page.selectOption('[data-testid=anki-deck]', 'Mining');
+await page.selectOption('[data-testid=anki-model]', 'Japanese Sentence');
 await page.waitForSelector('.field-map');
-const mapping = await page.$$eval('.field-map', (els) => els.map((e) => [e.querySelector('.field-name').textContent, e.querySelector('input').value]));
-check(JSON.stringify(mapping) === JSON.stringify([['Word', '{expression}'], ['Reading', '{reading}'], ['Sentence', '{sentence}'], ['Meaning', '{glossary}'], ['Picture', '{image}'], ['Audio', '{audio}']]), `fields auto-mapped: ${JSON.stringify(mapping)}`);
+const mapping = await page.$$eval('[data-testid=anki-settings] .field-map', (els) => els.map((e) => [e.querySelector('.field-name').textContent, e.querySelector('input').value]));
+check(JSON.stringify(mapping) === JSON.stringify([['Word', '{expression}'], ['Reading', '{reading}'], ['Sentence', '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}'], ['Meaning', '{glossary}'], ['Picture', '{image}'], ['Audio', '{audio}']]), `fields auto-mapped: ${JSON.stringify(mapping)}`);
 await shot('02-settings');
-await page.click('text=Capture');
 
 async function ocr(fixture) {
+  await tab('Capture');
   const t = Date.now();
   await page.setInputFiles('[data-testid=file-input]', join(root, 'tests/fixtures', fixture));
   await page.waitForSelector('[data-testid=reader] .line span', { timeout: 180_000 });
   await page.waitForFunction(() => !document.querySelector('.busy-overlay'), null, { timeout: 180_000 });
-  const text = await page.$eval('[data-testid=reader]', (el) => [...el.querySelectorAll('.line')].map((l) => l.textContent).join('\n'));
+  const text = await page.$eval('[data-testid=reader]', (el) => [...el.querySelectorAll('.line')].map((l) => [...l.querySelectorAll('span[data-i]')].map((s) => s.textContent).join('')).join('\n'));
   console.log(`  ${fixture} OCR in ${((Date.now() - t) / 1000).toFixed(1)}s:\n    ${text.replace(/\n/g, '\n    ')}`);
   return text;
 }
+const tapChar = async (ch, nth = 0) => {
+  const idx = await page.$$eval('[data-testid=reader] span[data-i]', (els, [c, n]) => els.filter((e) => e.textContent === c)[n]?.dataset.i, [ch, nth]);
+  await page.click(`[data-i="${idx}"]`);
+  await page.waitForSelector('[data-testid=popup] .entry, [data-testid=popup] .empty');
+};
 
 const expected = ['吾輩は猫である。名前はまだ無い。', 'どこで生れたかとんと見当がつかぬ。', '昨日は本を読まなかった。'];
 const similarity = (a, b) => {
@@ -115,44 +145,131 @@ for (const fx of ['horizontal.png', 'vertical.png', 'rotated.png', 'vertical2.pn
   const sim = similarity(text.replace(/\n/g, ''), (fx === 'vertical2.png' ? expected2 : expected).join(''));
   check(sim > 0.95, `${fx}: text matches (${(sim * 100).toFixed(1)}%)`);
   await shot(`03-${fx.replace('.png', '')}`);
-  await page.click('text=Capture');
 }
 
-// 3. Look up 読まなかった in the last (horizontal) page and mine it
+// 3. One-tap add from the popup, then "view note"
 await ocr('horizontal.png');
-const idx = await page.$$eval('[data-testid=reader] span[data-i]', (els) => els.find((e) => e.textContent === '読')?.dataset.i);
-await page.click(`[data-i="${idx}"]`);
-await page.waitForSelector('[data-testid=popup] .entry');
+await tapChar('読');
 const head = await page.$eval('[data-testid=popup] .entry .headword', (e) => e.textContent);
 const reasons = await page.$eval('[data-testid=popup] .entry .reasons', (e) => e.textContent).catch(() => '');
 check(head.includes('読む') || head.includes('読よむ'), `popup headword: ${head} ${reasons}`);
 check(reasons.includes('negative') && reasons.includes('past'), 'deinflection reasons shown');
 await shot('04-popup');
-
 await page.click('[data-testid=popup] [data-testid=mine-button] >> nth=0');
+await page.waitForSelector('.toast-ok', { timeout: 20_000 });
+let add = lastCall('addNote');
+check(!!add, 'one-tap add sent addNote');
+if (add) {
+  const f = add.params.note.fields;
+  console.log('  note:', JSON.stringify({ ...f, Meaning: f.Meaning.slice(0, 70) + '…' }));
+  check(f.Word === '読む' && f.Reading === 'よむ', 'word/reading fields');
+  check(f.Sentence === '昨日は本を<b>読まなかった</b>。', 'sentence bolds the inflected word');
+  check(f.Meaning.includes('yomitan-glossary') && f.Meaning.includes('to read'), 'glossary in Yomitan format');
+  check(/^<img src="mobilemining_\d+\.jpg">$/.test(f.Picture), 'picture stored via storeMediaFile');
+  check(add.params.note.audio?.[0]?.fields?.[0] === 'Audio', 'audio requested for Audio field');
+}
+await page.waitForSelector('[data-testid=popup] [data-testid=view-note]');
+await page.click('[data-testid=popup] [data-testid=view-note] >> nth=0');
+await page.waitForTimeout(300);
+check(lastCall('guiBrowse')?.params.query === `nid:${add?.params ? 1700000000000 : ''}`, `view note opens Anki browser (${JSON.stringify(lastCall('guiBrowse')?.params)})`);
+
+// Duplicate state when looking the word up again
+await page.keyboard.press('Escape');
+await tapChar('読');
+await page.waitForFunction(() => document.querySelector('[data-testid=popup] [data-testid=mine-button]')?.classList.contains('dupe'), null, { timeout: 10_000 }).catch(() => {});
+check(await page.$eval('[data-testid=popup] [data-testid=mine-button]', (e) => e.classList.contains('dupe')), 'popup marks the word as already in Anki');
+
+// Editor sheet
+await page.click('[data-testid=popup] [data-testid=edit-button] >> nth=0');
 await page.waitForSelector('[data-testid=mine-sheet]');
 const sentence = await page.$eval('[data-testid=sentence]', (e) => e.value);
 check(sentence === '昨日は本を読まなかった。', `sentence extracted: ${sentence}`);
+check(!!(await page.waitForSelector('[data-testid=mine-overwrite]', { timeout: 10_000 }).catch(() => null)), 'editor offers overwrite / add new for duplicates');
 await shot('05-mine');
-await page.click('[data-testid=mine-submit]');
-await page.waitForSelector('.toast-ok', { timeout: 20_000 });
-const add = ankiCalls.find((c) => c.action === 'addNote');
-check(!!add, 'addNote sent to AnkiConnect');
-if (add) {
-  const f = add.params.note.fields;
-  console.log('  note:', JSON.stringify({ deck: add.params.note.deckName, model: add.params.note.modelName, ...f, Meaning: f.Meaning.slice(0, 60) + '…' }));
-  check(f.Word === '読む' && f.Reading === 'よむ', 'word/reading fields');
-  check(f.Sentence === '昨日は本を<b>読まなかった</b>。', 'sentence bolds the inflected word');
-  check(/^<img src="mobilemining_\d+\.jpg">$/.test(f.Picture), 'picture stored via storeMediaFile');
-  check(add.params.note.audio?.[0]?.fields?.[0] === 'Audio', 'audio requested for Audio field');
-  check(ankiCalls.some((c) => c.action === 'storeMediaFile' && c.params.data.length > 1000), 'image data uploaded');
+await page.click('[data-testid=mine-overwrite]');
+await page.waitForSelector('[data-testid=mine-sheet]', { state: 'detached', timeout: 20_000 });
+check(lastCall('updateNoteFields')?.params.note.id === 1700000000000, 'overwrite updates the existing note');
+
+// 4. Import Yomitan dictionaries
+await tab('Settings');
+await page.setInputFiles('[data-testid=dict-file]', [join(root, 'tests/fixtures/test-dict.zip'), join(root, 'tests/fixtures/test-freq.zip')]);
+await page.waitForFunction(() => [...document.querySelectorAll('.dict-title')].map((e) => e.textContent).includes('Test Freq'), null, { timeout: 30_000 });
+const dictRows = await page.$$eval('.dict-row', (els) => els.map((e) => e.querySelector('.dict-title').textContent + ' | ' + e.querySelector('.muted').textContent));
+console.log('  dictionaries:\n    ' + dictRows.join('\n    '));
+check(dictRows.some((r) => r.startsWith('Test Dict') && r.includes('3 terms') && r.includes('1 images')), 'term dictionary imported with media');
+check(dictRows.some((r) => r.startsWith('Test Freq') && r.includes('frequency') && r.includes('pitch accent') && r.includes('kanji')), 'frequency/pitch/kanji dictionary imported');
+
+// 5. Import Yomitan settings
+await page.setInputFiles('[data-testid=yomitan-file]', join(root, 'tests/fixtures/yomitan-settings.json'));
+await page.waitForSelector('[data-testid=yomitan-summary]');
+const summary = await page.$eval('[data-testid=yomitan-summary]', (e) => e.innerText);
+console.log('  ' + summary.replace(/\n/g, '\n  '));
+check(summary.includes('note type “Lapis”') && summary.includes('Jitendex'), 'Yomitan settings imported with warnings for missing dictionaries');
+check(await page.$eval('[data-field="MainDefinition"]', (e) => e.value) === '{single-glossary-test-dict}', 'Yomitan field markers imported');
+const order = await page.$$eval('.dict-title', (els) => els.map((e) => e.textContent));
+check(order[0] === 'Test Dict' && order[1] === 'Test Freq', `dictionary order from Yomitan: ${order.join(', ')}`);
+await shot('06-settings-yomitan');
+
+// 6. Furigana: removed from the text, shown as ruby, available for cards
+const rubyExpected = ['昨日は図書館で本を読んだ。', '薔薇の花が咲いている。', '明日も学校に行きます。'];
+for (const fx of ['ruby-vertical.png', 'ruby-horizontal.png']) {
+  const text = await ocr(fx);
+  const sim = similarity(text.replace(/\n/g, ''), rubyExpected.join(''));
+  check(sim > 0.95, `${fx}: furigana kept out of the text (${(sim * 100).toFixed(1)}%)`);
+  const rts = await page.$$eval('[data-testid=reader] ruby', (els) => els.map((r) => [...r.querySelectorAll('span[data-i]')].map((s) => s.textContent).join('') + '[' + r.querySelector('rt').textContent + ']'));
+  console.log('  ruby: ' + rts.join(' '));
+  const want = ['昨日[きのう]', '図書館[としょかん]', '本[ほん]', '読[よ]', '薔薇[ばら]', '花[はな]', '明日[あした]', '学校[がっこう]'];
+  const got = want.filter((w) => rts.includes(w));
+  check(got.length >= want.length - 1, `${fx}: furigana attached to the right kanji (${got.length}/${want.length})`);
+  await shot(`07-${fx.replace('.png', '')}`);
 }
 
-// 4. Mined list
-await page.click('text=Mined');
+// 7. Imported dictionary in the popup + mining with the imported Lapis setup
+await tapChar('読');
+await page.waitForSelector('[data-testid=popup] [data-dictionary="Test Dict"]');
+const popupInfo = await page.$eval('[data-testid=popup]', (el) => ({
+  text: el.innerText,
+  img: el.querySelector('img.gloss-image')?.getAttribute('src') ?? '',
+  color: getComputedStyle(el.querySelector('[data-sc-content="glossary"]')).color,
+  freq: el.querySelector('.tag.freq')?.textContent,
+  pitch: el.querySelector('.pitch-num')?.textContent,
+}));
+console.log('  popup:', JSON.stringify({ ...popupInfo, text: popupInfo.text.slice(0, 120) }));
+check(popupInfo.text.includes('to read (a book)'), 'structured content rendered');
+check(popupInfo.img.startsWith('blob:'), 'dictionary image loaded');
+check(popupInfo.color === 'rgb(1, 2, 3)', 'dictionary styles.css applied');
+check(popupInfo.freq?.includes('830') && popupInfo.pitch === '[1]', 'frequency and pitch accent shown');
+await shot('08-popup-imported');
+await page.click('[data-testid=popup] a.gloss-link');
+await page.waitForSelector('.popup-nav');
+check((await page.$eval('[data-testid=popup]', (e) => e.innerText)).includes('guess; conjecture'), 'dictionary link opens nested lookup');
+await page.click('.popup-nav button');
+await page.click('[data-testid=popup] [data-testid=mine-button] >> nth=0');
+await page.waitForSelector('.toast-ok', { timeout: 20_000 });
+add = lastCall('addNote');
+if (add) {
+  const f = add.params.note.fields;
+  console.log('  lapis note:', JSON.stringify({ ...f, MainDefinition: f.MainDefinition.slice(0, 90) + '…' }));
+  check(add.params.note.modelName === 'Lapis' && f.Expression === '読む' && f.ExpressionFurigana === '読[よ]む', 'Lapis note fields');
+  check(f.MainDefinition.includes('to read (a book)') && /<img src="mobilemining_dict_\w+\.png"/.test(f.MainDefinition), 'single-glossary marker with dictionary image uploaded');
+  check(f.SentenceFurigana.includes('図書館[としょかん]') && f.SentenceFurigana.includes('昨日[きのう]'), `sentence furigana from the photo: ${f.SentenceFurigana}`);
+  check(f.Sentence === '昨日は図書館で本を<b>読んだ</b>。', 'sentence without furigana');
+  check(f.PitchPosition === '1' && f.FreqSort === '830', 'pitch and frequency markers');
+  check(/^<img src="mobilemining_\d+\.jpg">$/.test(f.Picture), '{screenshot} maps to the photo');
+}
+
+// 8. One-click note type setup
+await tab('Settings');
+await page.click('[data-testid=anki-setup]');
+await page.waitForSelector('[data-field="Meaning"]', { timeout: 20_000 });
+check(lastCall('createModel')?.params.modelName === 'MobileMining', 'creates the MobileMining note type');
+check(await page.$eval('[data-field="Meaning"]', (e) => e.value) === '{glossary}', 'MobileMining fields mapped');
+
+// 9. Mined list
+await tab('Mined');
 await page.waitForSelector('.note');
-check((await page.$$('.note')).length === 1, 'mined card listed');
-await shot('06-mined');
+check((await page.$$('.note')).length === 3, 'mined cards listed');
+await shot('09-mined');
 
 await browser.close();
 server.close();

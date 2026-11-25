@@ -19,19 +19,42 @@ export interface MinedNote {
 }
 
 const DB_NAME = 'mobilemining';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 export function openDb(): Promise<IDBDatabase> {
   dbPromise ??= new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (ev) => {
       const db = req.result;
-      const terms = db.createObjectStore('terms', { keyPath: 'id' });
-      terms.createIndex('keys', 'keys', { multiEntry: true });
-      db.createObjectStore('kanji', { keyPath: 'c' });
-      db.createObjectStore('meta');
-      db.createObjectStore('notes', { keyPath: 'id', autoIncrement: true });
+      if (ev.oldVersion < 1) {
+        const terms = db.createObjectStore('terms', { keyPath: 'id' });
+        terms.createIndex('keys', 'keys', { multiEntry: true });
+        db.createObjectStore('kanji', { keyPath: 'c' });
+        db.createObjectStore('meta');
+        db.createObjectStore('notes', { keyPath: 'id', autoIncrement: true });
+      }
+      if (ev.oldVersion < 2) {
+        // Imported Yomitan-format dictionaries
+        db.createObjectStore('dictionaries', { keyPath: 'title' });
+        const yt = db.createObjectStore('yterms', { keyPath: 'id', autoIncrement: true });
+        yt.createIndex('expression', 'expression');
+        yt.createIndex('reading', 'reading');
+        yt.createIndex('dict', 'dict');
+        const ym = db.createObjectStore('ytermMeta', { keyPath: 'id', autoIncrement: true });
+        ym.createIndex('expression', 'expression');
+        ym.createIndex('dict', 'dict');
+        const yk = db.createObjectStore('ykanji', { keyPath: 'id', autoIncrement: true });
+        yk.createIndex('character', 'character');
+        yk.createIndex('dict', 'dict');
+        const ykm = db.createObjectStore('ykanjiMeta', { keyPath: 'id', autoIncrement: true });
+        ykm.createIndex('character', 'character');
+        ykm.createIndex('dict', 'dict');
+        const tags = db.createObjectStore('ytags', { keyPath: ['dict', 'name'] });
+        tags.createIndex('dict', 'dict');
+        const media = db.createObjectStore('media', { keyPath: ['dict', 'path'] });
+        media.createIndex('dict', 'dict');
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -40,14 +63,14 @@ export function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-function promisify<T>(req: IDBRequest<T>): Promise<T> {
+export function promisify<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 }
 
-function txDone(tx: IDBTransaction): Promise<void> {
+export function txDone(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
