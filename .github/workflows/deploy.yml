@@ -25,8 +25,22 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      # Source files (dictionaries, models) are cached between runs: refreshed weekly, and the last
+      # good copy is used if a download server is down.
+      - id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      - id: sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache
+            public/models
+          key: sources-${{ steps.week.outputs.week }}
+          restore-keys: sources-
       # Downloads PP-OCRv6 models (Hugging Face) and builds JMdict/KANJIDIC2 (EDRDG)
       - run: npm run setup
+        env:
+          DICT_REFRESH: ${{ steps.sources.outputs.cache-hit != 'true' && '1' || '0' }}
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:

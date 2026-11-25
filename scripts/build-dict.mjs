@@ -24,10 +24,20 @@ async function exists(p) {
   try { await stat(p); return true; } catch { return false; }
 }
 
+/**
+ * Downloads a source file into .cache/. With DICT_REFRESH=1 a cached copy is refreshed, but kept
+ * (with a warning) if the download fails, so an unreachable EDRDG server never breaks a deploy.
+ */
 async function download({ url, file }) {
   const dest = join(cacheDir, file);
-  if (await exists(dest)) return dest;
-  await writeFile(dest, await fetchRetry(url));
+  const cached = await exists(dest);
+  if (cached && process.env.DICT_REFRESH !== '1') return dest;
+  try {
+    await writeFile(dest, await fetchRetry(url));
+  } catch (e) {
+    if (!cached) throw e;
+    console.warn(`Could not refresh ${file} (${e.cause?.code ?? e.message}); using the cached copy.`);
+  }
   return dest;
 }
 
