@@ -336,3 +336,5 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
 .ok-text { color: var(--ok); }
 /* Toasts at the top: the bottom holds the dictionary panel and editing bars. */
 .toast { bottom: auto; top: calc(env(safe-area-inset-top) + 62px); }
+.area-handle { pointer-events: none; }
+.area-hit { fill: transparent; touch-action: none; cursor: grab; }

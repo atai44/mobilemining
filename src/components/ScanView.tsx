@@ -190,6 +190,18 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
     setZoom(z);
   };
 
+  // A touch that starts on a section-box handle drags the handle. Browsers decide on scrolling at
+  // touchstart and ignore touch-action on SVG shapes, so claim the touch here (non-passive).
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const claim = (e: TouchEvent) => {
+      if (e.touches.length === 1 && (e.target as Element).closest?.('.area-hit')) e.preventDefault();
+    };
+    svg.addEventListener('touchstart', claim, { passive: false });
+    return () => svg.removeEventListener('touchstart', claim);
+  }, [s.url]);
+
   // Ctrl+wheel / trackpad pinch on desktop
   useEffect(() => {
     const el = scrollRef.current;
@@ -516,13 +528,18 @@ function AreaLayer({ svgRef, W, selected, flash, onSelect }: {
             {sel && (
               <>
                 <line class="area-knob-line" x1={top.x} y1={top.y} x2={knob.x} y2={knob.y} style={{ stroke: color }} />
-                <circle class="area-handle rotate" cx={knob.x} cy={knob.y} r={px(12)} style={{ stroke: color }} onPointerDown={start(a, 'rotate')} {...handlers} data-handle="rotate" />
-                <circle class="area-handle move" cx={a.cx} cy={a.cy} r={px(14)} style={{ stroke: color }} onPointerDown={start(a, 'move')} {...handlers} data-handle="move" />
+                <circle class="area-handle rotate" cx={knob.x} cy={knob.y} r={px(12)} style={{ stroke: color }} />
+                <circle class="area-handle move" cx={a.cx} cy={a.cy} r={px(14)} style={{ stroke: color }} />
                 <text class="area-glyph" x={knob.x} y={knob.y} font-size={px(15)} text-anchor="middle" dominant-baseline="central">⟲</text>
                 <text class="area-glyph" x={a.cx} y={a.cy} font-size={px(16)} text-anchor="middle" dominant-baseline="central">✥</text>
                 {handles.map(([kind, sx, sy, p]) => (
-                  <rect key={`${kind}${sx}${sy}`} class="area-handle" x={p.x - hs} y={p.y - hs} width={hs * 2} height={hs * 2} rx={px(3)}
-                    style={{ stroke: color }} onPointerDown={start(a, kind, sx, sy)} {...handlers} data-handle={`${kind}${sx}${sy}`} />
+                  <rect key={`${kind}${sx}${sy}`} class="area-handle" x={p.x - hs} y={p.y - hs} width={hs * 2} height={hs * 2} rx={px(3)} style={{ stroke: color }} />
+                ))}
+                {/* Larger invisible touch targets on top of the visible handles */}
+                <circle class="area-hit" cx={knob.x} cy={knob.y} r={px(24)} onPointerDown={start(a, 'rotate')} {...handlers} data-handle="rotate" />
+                <circle class="area-hit" cx={a.cx} cy={a.cy} r={px(24)} onPointerDown={start(a, 'move')} {...handlers} data-handle="move" />
+                {handles.map(([kind, sx, sy, p]) => (
+                  <circle key={`hit${kind}${sx}${sy}`} class="area-hit" cx={p.x} cy={p.y} r={px(22)} onPointerDown={start(a, kind, sx, sy)} {...handlers} data-handle={`${kind}${sx}${sy}`} />
                 ))}
               </>
             )}

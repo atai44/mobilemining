@@ -466,6 +466,30 @@ const w1 = await page.$eval('[data-testid=image-reader] .image-wrap', (e) => e.g
 check(w1 > w0 * 1.5, `photo zooms (${w0.toFixed(0)}px → ${w1.toFixed(0)}px)`);
 await shot('08b-zoomed');
 
+// One-finger touch on a section box handle drags it (doesn't scroll the photo)
+{
+  const cdp = await context.newCDPSession(page);
+  await ocr('dense-vertical.png');
+  await toImage();
+  await page.evaluate(() => { document.querySelector('.image-wrap').style.width = '250%'; });
+  const r = await page.$eval('.image-scroll', (e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  await page.click('[data-testid=select-area]');
+  await page.mouse.move(r.x + r.w * 0.3, r.y + r.h * 0.2); await page.mouse.down(); await page.mouse.move(r.x + r.w * 0.6, r.y + r.h * 0.5, { steps: 5 }); await page.mouse.up();
+  await page.waitForSelector('[data-handle=move]');
+  const sc = () => page.$eval('.image-scroll', (e) => [e.scrollLeft, e.scrollTop].join(','));
+  const w = () => page.$eval('[data-area] polygon.area-box', (e) => e.getBoundingClientRect().width);
+  const c = await page.$eval('[data-handle="edge10"]', (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  const [s0, w0] = [await sc(), await w()];
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [c] });
+  for (let i = 1; i <= 8; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: c.x + i * 8, y: c.y }] }); await page.waitForTimeout(16); }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.waitForTimeout(250);
+  const [s1, w1] = [await sc(), await w()];
+  check(w1 > w0 + 40 && s0 === s1, `one-finger touch drags a box handle without scrolling (${w0.toFixed(0)} → ${w1.toFixed(0)}px, scroll ${s0} → ${s1})`);
+  await page.click('[data-testid=area-delete]');
+  await cdp.detach();
+}
+
 // 8. One-click note type setup
 await tab('Settings');
 await page.click('[data-testid=anki-setup]');
