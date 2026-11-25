@@ -326,7 +326,8 @@ export function ctcDecode(out: Tensor, dict: string[], altCount = 5): (OcrChar &
   // The recognizer emits ' ' between words in Latin text; trim edges.
   while (chars.length && chars[0].c === ' ') chars.shift();
   while (chars.length && chars[chars.length - 1].c === ' ') chars.pop();
-  return chars.map((c) => ({ ...c, c: c.c.normalize('NFC') }));
+  // Latin middle dots between kana/kanji are the Japanese ・
+  return chars.map((c) => ({ ...c, c: c.c === '·' || c.c === '•' ? '・' : c.c.normalize('NFC') }));
 }
 
 /**
@@ -487,16 +488,44 @@ export async function detectLines(det: RGBAImage, srcW: number, srcH: number, op
   return componentsToLines(comps, pw, ph, srcW, srcH, opts.orientation);
 }
 
-/** Step 2: read one detected line. */
-export async function recognizeLine(src: RGBAImage, g: LineGeom, runRec: RunModel, dict: string[]): Promise<OcrLine | null> {
-  const strip = recTensor(src, g.quad);
+async function readQuad(src: RGBAImage, quad: [Point, Point, Point, Point], vertical: boolean, runRec: RunModel, dict: string[]) {
+  const strip = recTensor(src, quad);
   const out = await runRec(strip);
   let decoded = ctcDecode(out, dict);
-  if (g.vertical && decoded.length) decoded = await restoreVerticalMarks(strip, out.dims[1], decoded, runRec, dict);
+  if (vertical && decoded.length) decoded = await restoreVerticalMarks(strip, out.dims[1], decoded, runRec, dict);
   const T = out.dims[1];
   const chars: OcrChar[] = decoded.map(({ t, ...c }) => ({ ...c, u: (t + 0.5) / T }));
+  const conf = chars.length ? chars.reduce((a, c) => a + c.p, 0) / chars.length : 0;
+  return { chars, conf };
+}
+
+type Quad = [Point, Point, Point, Point];
+// Reading-frame rotations of a line quad [start-top, end-top, end-bottom, start-bottom]
+const rot180 = (q: Quad): Quad => [q[2], q[3], q[0], q[1]];
+const rotCW = (q: Quad): Quad => [q[3], q[0], q[1], q[2]];
+const rotCCW = (q: Quad): Quad => [q[1], q[2], q[3], q[0]];
+
+/**
+ * Step 2: read one detected line. Text can be at any angle on a page (an upside-down book on a
+ * desk, a sideways label): when the first reading is unsure, the line is also read turned
+ * 180° (and single characters at 90°/270°), keeping the most confident reading.
+ */
+export async function recognizeLine(src: RGBAImage, g: LineGeom, runRec: RunModel, dict: string[]): Promise<OcrLine | null> {
+  let best: { quad: Quad; vertical: boolean; mid?: Point[]; chars: OcrChar[]; conf: number } = { quad: g.quad, vertical: g.vertical, mid: g.mid, ...(await readQuad(src, g.quad, g.vertical, runRec, dict)) };
+  if (best.conf < 0.8) {
+    const len = Math.hypot(g.quad[1].x - g.quad[0].x, g.quad[1].y - g.quad[0].y);
+    const th = Math.hypot(g.quad[3].x - g.quad[0].x, g.quad[3].y - g.quad[0].y);
+    const tries: { quad: Quad; vertical: boolean; mid?: Point[] }[] = [{ quad: rot180(g.quad), vertical: g.vertical, mid: g.mid && [...g.mid].reverse() }];
+    if (len < th * 1.6) tries.push({ quad: rotCW(g.quad), vertical: !g.vertical, mid: g.mid }, { quad: rotCCW(g.quad), vertical: !g.vertical, mid: g.mid });
+    for (const t of tries) {
+      const r = await readQuad(src, t.quad, t.vertical, runRec, dict);
+      // Turned readings must be clearly better: small unsure lines (furigana) otherwise flip to noise.
+      if (r.conf > Math.max(best.conf + 0.15, 0.7) && r.chars.length >= best.chars.length * 0.6) best = { ...t, ...r };
+    }
+  }
+  const chars = best.chars;
   if (!chars.length) return null;
-  return { text: chars.map((c) => c.c).join(''), chars, vertical: g.vertical, quad: g.quad, box: quadBox(g.quad), score: g.score, mid: g.mid, width: g.width };
+  return { text: chars.map((c) => c.c).join(''), chars, vertical: best.vertical, quad: best.quad, box: quadBox(best.quad), score: g.score, mid: best.mid, width: g.width };
 }
 
 export async function runOcr(

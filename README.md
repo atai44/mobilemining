@@ -19,16 +19,19 @@ uploaded unless you turn on the optional cloud OCR engine. After the first load 
 - **No waiting**: the photo appears immediately. Lines are found in about a second and then read one by one in the
   background, each becoming tappable as soon as it's read. Tapping a part that hasn't been read yet reads that part
   first (its line, the lines next to it, and their furigana).
-- **Any orientation**: sideways or upside-down photos are detected (PaddleOCR's page-orientation model, voting over
-  rotations) and turned upright automatically; ⟳ rotates by hand.
+- **Any orientation**: sideways or upside-down photos are detected (PaddleOCR's page-orientation model on crops around
+  the text, voting over rotations) and turned upright automatically; ⟳ rotates by hand. Individual lines at other
+  angles (an upside-down book among upright ones) are read turned when that reads better.
+- **Dictionary panel**: lookups open in a panel below the photo (beside it on wide screens), so the sentence is never
+  covered; the photo scrolls the word into view and the panel can be resized.
 - **Real-world furigana**: lines are measured along their actual (curved, slanted) centre line and true text width, so
   furigana on photographed book pages lands on the right word. Furigana readings are checked against the dictionary,
   which fixes lost small kana and voicing marks (ちよつと → ちょっと) and splits runs covering two words. Where a
   kanji was misread, the furigana can correct it from the OCR's runner-up guesses (説論 + せつゆ → 説諭).
 - **Fix the sections**: § Sections shows how the page was split into sections and their reading order. You can
-  resize a section's box with its handles (text inside the box belongs to it), draw a new section, re-read a box,
-  reorder, merge, split at a line, re-read a section as vertical or horizontal, delete junk (page numbers, stray
-  marks), or reset.
+  reorder, merge, split at a line, re-read a box or re-read it as vertical/horizontal, delete junk (page numbers, stray
+  marks), or reset. ⬚ Area: drag a box around the text you want and it becomes its own section (read first if nothing
+  was detected there).
 - **Read on the photo itself**: scroll and pinch-zoom the photo (Ctrl/trackpad pinch on desktop) and tap any word
   where it's printed. The word is highlighted in place. A text view (Aa) is still there for copying and editing.
 - **Mixed text directions** on one page work: a vertical body with a horizontal heading or captions, speech bubbles,

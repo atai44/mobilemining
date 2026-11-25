@@ -231,23 +231,21 @@ export function startAnalysis() {
       if (scan.value?.canvas !== canvas) return;
       page.phase = 'detect';
       rebuild();
-      let cv = canvas;
-      // Photos often come out sideways or upside down: turn the page upright first (once per photo).
-      if (!checkedOrientation.has(canvas) && settings.value.ocr.autoRotate) {
-        checkedOrientation.add(canvas);
-        const { rotate, scores } = await localEngine.orientation(canvas);
-        const sorted = [...scores].sort((a, b) => b - a);
-        if (rotate && sorted[0] > 0.45 && sorted[0] - sorted[1] > 0.15 && scan.value?.canvas === canvas) {
-          cv = rotateCanvas(canvas, rotate);
-          checkedOrientation.add(cv);
-          const old = scan.value.url;
-          scan.value = { ...scan.value, canvas: cv, url: await canvasUrl(cv) };
-          if (old) URL.revokeObjectURL(old);
-          showToast(`Turned the photo ${rotate === 180 ? 'upside down' : rotate === 90 ? 'left' : 'right'} to make the text upright (⟳ to change)`, 'info');
-        }
-      }
-      if (scan.value?.canvas !== cv) return;
-      const sess = new OcrSession(cv, { ...o }, () => scheduleRebuild());
+      // Photos often come out sideways or upside down: the session checks (once per photo) and
+      // asks us to turn the page upright.
+      const check = settings.value.ocr.autoRotate && !checkedOrientation.has(canvas);
+      checkedOrientation.add(canvas);
+      const rotatePage = async (rotate: number) => {
+        if (scan.value?.canvas !== canvas) return null;
+        const cv = rotateCanvas(canvas, rotate);
+        checkedOrientation.add(cv);
+        const old = scan.value.url;
+        scan.value = { ...scan.value, canvas: cv, url: await canvasUrl(cv) };
+        if (old) URL.revokeObjectURL(old);
+        showToast(`Turned the photo ${rotate === 180 ? 'upside down' : rotate === 90 ? 'left' : 'right'} to make the text upright (⟳ to change)`, 'info');
+        return cv;
+      };
+      const sess = new OcrSession(canvas, { ...o }, () => scheduleRebuild(), check ? rotatePage : undefined);
       page.session = sess;
       sess.ready.then(() => { if (page.session === sess) { page.phase = 'read'; rebuild(); } });
     })
@@ -359,14 +357,8 @@ export async function focusAt(p: Point): Promise<number> {
       if (i >= 0 || sess.lines[li].result) return i;
     }
   }
-  // Nothing detected here: read a window around the tap.
-  const W = s.canvas.width, H = s.canvas.height;
-  const r = Math.max(160, Math.min(W, H) * 0.2);
-  const rect = { x: Math.max(0, p.x - r), y: Math.max(0, p.y - r), w: 0, h: 0 };
-  rect.w = Math.min(W - rect.x, 2 * r);
-  rect.h = Math.min(H - rect.y, 2 * r);
-  await runOcr(rect);
-  return charAt(p);
+  // Nothing was detected here: leave it (⬚ Area reads a part of the photo on request).
+  return -1;
 }
 
 // --- Section editing ----------------------------------------------------------------------
@@ -459,7 +451,11 @@ export function setSectionBox(i: number | null, rect: Rect): boolean {
         out.push(g.filter((k) => !inside.has(k)));
       }
     });
-    if (i === null) out.push([...inside]);
+    if (i === null) {
+      // A user-drawn section goes where its text was in the reading order.
+      const at = secs.findIndex((g) => g.some((k) => inside.has(k)));
+      out.splice(at < 0 ? out.length : at, 0, [...inside]);
+    }
     return out;
   });
   return true;

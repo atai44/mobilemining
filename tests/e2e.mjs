@@ -305,28 +305,21 @@ for (const fx of ['dense-vertical.png', 'dense-vertical-tilt.png', 'dense-horizo
   check((await count()) >= 4, 're-reading a section with a forced direction');
   await page.click('[data-testid=sec-reset]');
 
-  // Resize a section's box: drag the note box's top-right handle over the heading
-  await pickSection(2);
-  const handle = await page.$eval('g[data-section="2"] [data-handle=ne]', (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
-  const headTop = await page.$eval('g[data-section="0"] rect.section-box', (e) => { const r = e.getBoundingClientRect(); return { x: r.right - 2, y: r.top + 2 }; });
-  await page.mouse.move(handle.x, handle.y);
+  // ⬚ Area: a box drawn around text becomes its own section
+  await page.click('.section-bar >> text=Done');
+  const capBox = await page.$$eval('[data-testid=image-reader] polygon.line-box', (els) => {
+    const rs = els.map((e) => e.getBoundingClientRect()).filter((r) => r.width > r.height * 3);
+    const r = rs.sort((a, b) => b.bottom - a.bottom)[0]; // the caption row
+    return { x0: r.x + r.width * 0.55, y0: r.y - 4, x1: r.right + 4, y1: r.bottom + 4 };
+  });
+  await page.click('[data-testid=select-area]');
+  await page.mouse.move(capBox.x0, capBox.y0);
   await page.mouse.down();
-  await page.mouse.move((handle.x + headTop.x) / 2, (handle.y + headTop.y) / 2, { steps: 4 });
-  await page.mouse.move(headTop.x, headTop.y - 4, { steps: 4 });
+  await page.mouse.move(capBox.x1, capBox.y1, { steps: 6 });
   await page.mouse.up();
-  await page.waitForTimeout(300);
-  const merged = await flatText();
-  check((await count()) === 3 && /注：作者は夏目漱石。第一章猫の話|第一章猫の話注：作者は夏目漱石。/.test(merged.replace(/写真.*/, '').replace(/吾輩.*?している。/, '')), `resizing a section box takes in the text inside it (${await count()} sections)`);
-  // Draw a new section around the caption's date
-  await page.click('[data-testid=sec-reset]');
-  await page.click('[data-testid=sec-new]');
-  const cap = await page.$eval('g[data-section="3"] rect.section-box', (e) => { const r = e.getBoundingClientRect(); return { x0: r.x, y0: r.y, x1: r.right, y1: r.bottom }; });
-  await page.mouse.move(cap.x0 + 2, cap.y0 + 2);
-  await page.mouse.down();
-  await page.mouse.move(cap.x1 - 2, cap.y1 - 2, { steps: 6 });
-  await page.mouse.up();
-  await page.waitForTimeout(300);
-  check((await count()) === 4, 'drawing a box over a whole section keeps it as one section');
+  await page.waitForTimeout(400);
+  await page.click('[data-testid=sections]');
+  check((await count()) === 5, `area box becomes its own section (${await count()} sections)`);
   await pickSection(3);
   await page.click('[data-testid=sec-reread]');
   await page.waitForFunction(() => !document.querySelector('[data-testid=ocr-progress]'), null, { timeout: 60_000 });
@@ -342,6 +335,13 @@ if (process.env.MM_PHOTOS) {
     '2.jpg': ['我慢[がまん]', '猶更[なおさら]', '疳性[かんしょう]', '講釈[こうしゃく]', '説諭[せつゆ]', '一寸[ちょっと]', '這入[はい]', '豪傑[ごうけつ]', '随分[ずいぶん]', '田舎[いなか]'],
     '3.jpg': ['挨拶[あいさつ]', '壻[むこ]', '騙[だま]', '面目[めんぼく]', '一旦[いったん]', '纏[まと]', '傾[かし]', '独語[ひとりごと]'],
   };
+  // Book covers at different angles (one upside down) on a desk
+  {
+    const text = (await ocr(join(process.env.MM_PHOTOS, 'covers.jpg'))).replace(/\s/g, '');
+    const words = ['坊っちゃん', '夏目漱石', '新潮文庫', '李陵', '山月記', '中島敦'];
+    const found = words.filter((w) => text.includes(w));
+    check(found.length >= 5, `covers photo: mixed orientations read (${found.join(' ')}) missing: ${words.filter((w) => !text.includes(w)).join(' ')}`);
+  }
   for (const [f, rubies] of Object.entries(want)) {
     await ocr(join(process.env.MM_PHOTOS, f));
     await page.waitForTimeout(1500); // dictionary check of furigana
@@ -370,6 +370,20 @@ for (const fx of ['ruby-vertical.png', 'ruby-horizontal.png']) {
 const yomuIdx = await tapChar('読');
 await page.waitForSelector('[data-testid=popup] [data-dictionary="Test Dict"]');
 const hlCount = await page.$$eval('[data-testid=image-reader] .ch.hl', (els) => els.map((e) => e.dataset.i));
+await page.waitForTimeout(600); // panel opens, page scrolls the word into view
+const overlap = await page.evaluate(() => {
+  const panel = document.querySelector('[data-testid=dict-panel]').getBoundingClientRect();
+  const reader = document.querySelector('[data-testid=image-reader]').getBoundingClientRect();
+  return [...document.querySelectorAll('[data-testid=image-reader] .ch.hl')].map((e) => e.getBoundingClientRect()).map((r) => ({
+    covered: r.bottom > panel.top && r.top < panel.bottom && r.right > panel.left && r.left < panel.right,
+    visible: r.top >= reader.top && r.bottom <= reader.bottom,
+  }));
+});
+check(overlap.length > 0 && overlap.every((o) => !o.covered && o.visible), `dictionary panel doesn't cover the word (${JSON.stringify(overlap)})`);
+await page.click('[data-testid=image-reader] .image-wrap', { position: { x: 5, y: 5 } }).catch(() => {});
+await page.waitForTimeout(300);
+check(!(await page.$('[data-testid=dict-panel]')) && !(await page.$('[data-testid=ocr-progress]')), 'tapping empty photo closes the panel without re-reading');
+await tapChar('読');
 check(hlCount.length === 3 && hlCount[0] === String(yomuIdx), `looked-up word highlighted on the photo (${hlCount.join(',')})`);
 const popupInfo = await page.$eval('[data-testid=popup]', (el) => ({
   text: el.innerText,
@@ -385,9 +399,9 @@ check(popupInfo.color === 'rgb(1, 2, 3)', 'dictionary styles.css applied');
 check(popupInfo.freq?.includes('830') && popupInfo.pitch === '[1]', 'frequency and pitch accent shown');
 await shot('08-popup-imported');
 await page.click('[data-testid=popup] a.gloss-link');
-await page.waitForSelector('.popup-nav');
+await page.waitForSelector('.popup-nav >> text=← Back');
 check((await page.$eval('[data-testid=popup]', (e) => e.innerText)).includes('guess; conjecture'), 'dictionary link opens nested lookup');
-await page.click('.popup-nav button');
+await page.click('.popup-nav >> text=← Back');
 await page.click('[data-testid=popup] [data-testid=mine-button] >> nth=0');
 await page.waitForSelector('.toast-ok', { timeout: 20_000 });
 add = lastCall('addNote');

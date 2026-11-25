@@ -45,6 +45,8 @@ export class OcrSession {
     private canvas: HTMLCanvasElement,
     private opts: OcrOptions & { detMaxSide: number },
     private onUpdate: (s: OcrSession) => void,
+    /** Called when the page should be turned (CCW degrees); returns the turned canvas, or null to keep it. */
+    private rotatePage?: (ccw: number) => Promise<HTMLCanvasElement | null>,
   ) {
     this.ready = this.detect();
     this.ready.then(() => this.loop()).catch((e) => { this.error = String(e?.message ?? e); this.onUpdate(this); });
@@ -53,13 +55,32 @@ export class OcrSession {
   get done(): number { return this.lines.filter((l) => l.status === 'done').length; }
   get finished(): boolean { return this.detected && this.lines.every((l) => l.status === 'done'); }
 
-  private async detect() {
+  private async findLines(): Promise<LineGeomMsg[]> {
     const { width: W, height: H } = this.canvas;
     const full = { x: 0, y: 0, w: W, h: H };
     await localEngine.setImage(this.imageId, rasterize(this.canvas, full, W, H));
     const s = Math.min(this.opts.detMaxSide / Math.max(W, H), 2);
-    const geoms = await localEngine.detect(this.imageId, rasterize(this.canvas, full, roundTo32(W * s), roundTo32(H * s)), this.opts);
+    return localEngine.detect(this.imageId, rasterize(this.canvas, full, roundTo32(W * s), roundTo32(H * s)), this.opts);
+  }
+
+  private async detect() {
+    let geoms = await this.findLines();
     if (this.cancelled) return;
+    // Is the page sideways / upside down? Judge from crops around the biggest text lines.
+    if (this.rotatePage && geoms.length) {
+      const big = [...geoms].sort((a, b) => length(b.quad) * thickness(b.quad) - length(a.quad) * thickness(a.quad)).slice(0, 6);
+      const { rotate, scores } = await localEngine.orientation(this.canvas, big.map((g) => g.quad));
+      const sorted = [...scores].sort((a, b) => b - a);
+      if (rotate && sorted[0] > 0.45 && sorted[0] - sorted[1] > 0.15) {
+        const turned = await this.rotatePage(rotate);
+        if (this.cancelled) return;
+        if (turned) {
+          this.canvas = turned;
+          geoms = await this.findLines();
+          if (this.cancelled) return;
+        }
+      }
+    }
     this.lines = geoms.map((geom, i) => ({ key: `d${i}`, geom, status: 'pending', result: null }));
     // Background order: reading order of the detected lines (furigana-sized lines go with their text).
     const pseudo = this.lines.map((l) => ({

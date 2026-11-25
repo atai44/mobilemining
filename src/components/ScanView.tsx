@@ -4,7 +4,7 @@ import { scan, settings, updateSettings, view, showToast, ocrState, locate, inde
 import {
   runOcr, rotateScan, startAnalysis, focusAt, setEditedText,
   mergeSections, moveSection, splitSection, deleteSection, redirectSection, resetSections,
-  setSectionBox, newSectionFromBox, rereadSection,
+  newSectionFromBox, rereadSection,
 } from '../scanActions';
 import type { LaidOutLine } from '../lib/ocr/layout';
 import type { TermResult } from '../lib/lookup';
@@ -16,12 +16,18 @@ import { MineSheet, type MineRequest } from './MineSheet';
 
 type Mode = 'image' | 'text';
 
+const PANEL_KEY = 'mobilemining.panelSize';
+const loadPanelSize = () => {
+  try { return Number(localStorage.getItem(PANEL_KEY)) || 0.42; } catch { return 0.42; }
+};
+
 export function ScanView() {
   const s = scan.value;
   const [mode, setMode] = useState<Mode>('image');
   // The popup is tied to a (line, character) position so it survives lines being read in the background.
   const [popup, setPopup] = useState<{ pos: { key: string; ci: number } | null; index: number; results: TermResult[]; anchor: DOMRect } | null>(null);
   const [mine, setMine] = useState<MineRequest | null>(null);
+  const [panelSize, setPanelSize] = useState(loadPanelSize); // fraction of the reader's height (or width on wide screens)
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => setPopup(null), [s?.url, mode]);
@@ -54,30 +60,71 @@ export function ScanView() {
   const r0 = livePopup?.results[0];
   const hl = livePopup ? { start: popupIndex, end: popupIndex + (r0 ? r0.span ?? r0.length : 1) } : null;
 
+  // Drag the panel's edge to resize it.
+  const startResize = (e: PointerEvent) => {
+    const root = rootRef.current;
+    if (!root) return;
+    e.preventDefault();
+    const grip = e.currentTarget as HTMLElement;
+    grip.setPointerCapture(e.pointerId);
+    const wide = getComputedStyle(root).flexDirection === 'row';
+    const move = (ev: PointerEvent) => {
+      const r = root.getBoundingClientRect();
+      const f = wide ? (r.right - ev.clientX) / r.width : (r.bottom - ev.clientY) / r.height;
+      setPanelSize(Math.min(0.75, Math.max(0.2, f)));
+    };
+    const up = () => {
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', up);
+      try { localStorage.setItem(PANEL_KEY, String(panelSizeRef.current)); } catch { /* ignore */ }
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up);
+  };
+  const panelSizeRef = useRef(panelSize);
+  panelSizeRef.current = panelSize;
+
   return (
-    <div class="scan" ref={rootRef}>
-      {effectiveMode === 'image' ? (
-        <ImageReader highlight={hl} onTap={lookupAt} onInteract={() => setPopup(null)} onShowText={() => setMode('text')} />
-      ) : (
-        <TextPanel highlight={hl} onTap={lookupAt} onShowImage={s.url ? () => setMode('image') : undefined} />
-      )}
+    <div class={`scan ${livePopup ? 'has-panel' : ''}`} ref={rootRef} style={{ '--panel-size': `${Math.round(panelSize * 100)}%` }}>
+      <div class="scan-main">
+        {effectiveMode === 'image' ? (
+          <ImageReader highlight={hl} onTap={lookupAt} onEmptyTap={() => setPopup(null)} onShowText={() => setMode('text')} />
+        ) : (
+          <TextPanel highlight={hl} onTap={lookupAt} onShowImage={s.url ? () => setMode('image') : undefined} />
+        )}
+      </div>
       {livePopup && (
-        <Popup
-          key={(livePopup.pos ? livePopup.pos.key + ':' + livePopup.pos.ci : livePopup.index) + ':' + livePopup.results.length}
-          index={popupIndex}
-          results={livePopup.results}
-          anchor={livePopup.anchor}
-          onClose={() => setPopup(null)}
-          onRelookup={() => {
-            const el = rootRef.current?.querySelector(`[data-i="${popupIndex}"]`);
-            lookupAt(popupIndex, el?.getBoundingClientRect() ?? livePopup.anchor);
-          }}
-          onEdit={(r) => setMine({ result: r, index: popupIndex })}
-        />
+        <div class="dict-panel" data-testid="dict-panel">
+          <div class="panel-grip" onPointerDown={startResize} title="Drag to resize" aria-label="Resize dictionary panel" />
+          <Popup
+            docked
+            key={(livePopup.pos ? livePopup.pos.key + ':' + livePopup.pos.ci : livePopup.index) + ':' + livePopup.results.length}
+            index={popupIndex}
+            results={livePopup.results}
+            anchor={livePopup.anchor}
+            onClose={() => setPopup(null)}
+            onRelookup={() => {
+              const el = rootRef.current?.querySelector(`[data-i="${popupIndex}"]`);
+              lookupAt(popupIndex, el?.getBoundingClientRect() ?? livePopup.anchor);
+            }}
+            onEdit={(r) => setMine({ result: r, index: popupIndex })}
+          />
+        </div>
       )}
       {mine && <MineSheet req={mine} onClose={() => setMine(null)} />}
     </div>
   );
+}
+
+/** Scrolls `container` so `el` is comfortably visible (it may have been hidden by the panel opening). */
+function keepVisible(container: HTMLElement, el: Element) {
+  const c = container.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  const mx = Math.min(40, c.width * 0.15), my = Math.min(60, c.height * 0.2);
+  let dx = 0, dy = 0;
+  if (r.top < c.top + my || r.bottom > c.bottom - my) dy = r.top + r.height / 2 - (c.top + c.height * 0.4);
+  if (r.left < c.left + mx || r.right > c.right - mx) dx = r.left + r.width / 2 - (c.left + c.width / 2);
+  if (dx || dy) container.scrollBy({ left: dx, top: dy, behavior: 'smooth' });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -87,10 +134,10 @@ export function ScanView() {
 const MAX_ZOOM = 8;
 const SECTION_COLORS = ['#e8590c', '#1c7ed6', '#2f9e44', '#ae3ec9', '#f08c00', '#0c8599', '#d6336c', '#5c940d'];
 
-function ImageReader({ highlight, onTap, onInteract, onShowText }: {
+function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
   highlight: { start: number; end: number } | null;
   onTap: (index: number, anchor: DOMRect) => void;
-  onInteract: () => void;
+  onEmptyTap: () => void;
   onShowText: () => void;
 }) {
   const s = scan.value!;
@@ -99,7 +146,7 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
   const svgRef = useRef<SVGSVGElement>(null);
   const [zoom, setZoom] = useState(1);
   const [fit, setFit] = useState(1); // zoom at which the whole page is visible
-  const [draw, setDraw] = useState<'area' | 'section' | null>(null);
+  const [draw, setDraw] = useState<'area' | null>(null);
   const selecting = draw !== null;
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [focus, setFocus] = useState<Point | null>(null);
@@ -163,7 +210,6 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
     if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       pinch.current = { dist: Math.hypot(a.x - b.x, a.y - b.y), zoom: zoomRef.current };
-      onInteract();
     }
   };
   const onPointerMove = (e: PointerEvent) => {
@@ -207,8 +253,9 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
     if (rect.w > 12 && rect.h > 12) {
       const mode = draw;
       setDraw(null);
-      if (mode === 'section') newSectionFromBox(rect);
-      else runOcr(rect);
+      // The box becomes its own section (reading the area first if no text was found in it).
+      void mode;
+      newSectionFromBox(rect);
     }
   };
 
@@ -223,9 +270,10 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
     if (selecting || sections) return;
     const el = (e.target as Element).closest('[data-i]');
     if (el) { onTap(Number((el as SVGElement).dataset.i), el.getBoundingClientRect()); return; }
-    onInteract();
-    // Not read yet (or nothing found here): read this spot first.
+    onEmptyTap();
+    // A line that hasn't been read yet: read it (and its neighbours) first.
     const p = toImage(e);
+    if (!(e.target as Element).closest('.pending') && !s.pending.length) return;
     setFocus(p);
     try {
       const i = await focusAt(p);
@@ -234,6 +282,16 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
       setFocus(null);
     }
   };
+
+  // Keep the looked-up word visible above (or beside) the dictionary panel.
+  useLayoutEffect(() => {
+    if (!highlight) return;
+    const id = requestAnimationFrame(() => {
+      const el = svgRef.current?.querySelector(`[data-i="${highlight.start}"]`);
+      if (el && scrollRef.current) keepVisible(scrollRef.current, el);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [highlight?.start]);
 
   const setOrientation = (o: Orientation) => {
     updateSettings((st) => (st.ocr.orientation = o));
@@ -252,7 +310,7 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
   return (
     <section class="image-reader">
       <div class="toolbar">
-        <button class={`button small ${draw === 'area' ? 'primary' : ''}`} onClick={() => { setSections(false); setDraw(draw === 'area' ? null : 'area'); }} title="Drag a box around text to read just that area" data-testid="select-area">
+        <button class={`button small ${draw === 'area' ? 'primary' : ''}`} onClick={() => { setSections(false); setDraw(draw === 'area' ? null : 'area'); }} title="Drag a box around the text you want: it becomes its own section" data-testid="select-area">
           ⬚ {draw === 'area' ? 'Drag…' : 'Area'}
         </button>
         <button class={`button small ${sections ? 'primary' : ''}`} onClick={() => { setDraw(null); setSections(!sections); }} title="Fix how the page is split into sections and their reading order" data-testid="sections">
@@ -276,7 +334,6 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
       <div
         class={`image-scroll ${selecting ? 'selecting' : ''}`}
         ref={scrollRef}
-        onScroll={onInteract}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerEnd}
@@ -314,11 +371,11 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
             {drag && (
               <rect class="sel-rect" x={Math.min(drag.x0, drag.x1)} y={Math.min(drag.y0, drag.y1)} width={Math.abs(drag.x1 - drag.x0)} height={Math.abs(drag.y1 - drag.y0)} />
             )}
-            {sections && <SectionOverlay unit={unit} toImage={toImage} W={W} H={H} />}
+            {sections && <SectionOverlay unit={unit} />}
           </svg>
         </div>
       </div>
-      {sections && <SectionBar drawing={draw === 'section'} onDraw={() => setDraw(draw === 'section' ? null : 'section')} onDone={() => { setDraw(null); setSections(false); }} />}
+      {sections && <SectionBar onDone={() => { setDraw(null); setSections(false); }} />}
       {!pg || pg.phase !== 'done' || s.lines.length || s.busy ? null : <div class="banner small">{s.error ?? 'No text found. Try ⬚ Area around the text, or retake the photo closer.'}</div>}
     </section>
   );
@@ -360,14 +417,10 @@ function sectionShapes(lines: LaidOutLine[]) {
   });
 }
 
-type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
-type Box = { x0: number; y0: number; x1: number; y1: number };
-
-function SectionOverlay({ unit, toImage, W, H }: { unit: number; toImage: (e: PointerEvent) => Point; W: number; H: number }) {
+function SectionOverlay({ unit }: { unit: number }) {
   const s = scan.value!;
   const sel = selection.value;
   const shapes = sectionShapes(s.lines as LaidOutLine[]);
-  const [resize, setResize] = useState<{ handle: Handle; box: Box } | null>(null);
   const pick = (block: number, key: string) => {
     if (sel.merging && sel.block >= 0 && block !== sel.block) {
       mergeSections(sel.block, block);
@@ -375,44 +428,15 @@ function SectionOverlay({ unit, toImage, W, H }: { unit: number; toImage: (e: Po
     } else selection.value = { block, key, merging: false };
   };
   const pad = unit * 0.6;
-  const startResize = (handle: Handle, box: Box) => (e: PointerEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    (e.currentTarget as Element).setPointerCapture(e.pointerId);
-    setResize({ handle, box });
-  };
-  const moveResize = (e: PointerEvent) => {
-    if (!resize) return;
-    const p = toImage(e);
-    const b = { ...resize.box };
-    const x = Math.min(Math.max(p.x, 0), W), y = Math.min(Math.max(p.y, 0), H);
-    if (resize.handle.includes('w')) b.x0 = Math.min(x, b.x1 - 10);
-    if (resize.handle.includes('e')) b.x1 = Math.max(x, b.x0 + 10);
-    if (resize.handle.includes('n')) b.y0 = Math.min(y, b.y1 - 10);
-    if (resize.handle.includes('s')) b.y1 = Math.max(y, b.y0 + 10);
-    setResize({ ...resize, box: b });
-  };
-  const endResize = () => {
-    if (!resize) return;
-    const b = resize.box;
-    setResize(null);
-    const rect = { x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0 };
-    if (!setSectionBox(sel.block, rect)) showToast('No text in that box — use ↻ Re-read box to read it', 'info');
-  };
   return (
     <g class="sections">
       {shapes.map((sh) => {
         const color = SECTION_COLORS[sh.block % SECTION_COLORS.length];
         const selected = sh.block === sel.block;
-        const box: Box = selected && resize ? resize.box : { x0: sh.x0 - pad, y0: sh.y0 - pad, x1: sh.x1 + pad, y1: sh.y1 + pad };
-        const bx = sh.vertical ? box.x1 : box.x0, by = box.y0;
-        const handles: [Handle, number, number][] = [
-          ['nw', box.x0, box.y0], ['n', (box.x0 + box.x1) / 2, box.y0], ['ne', box.x1, box.y0], ['e', box.x1, (box.y0 + box.y1) / 2],
-          ['se', box.x1, box.y1], ['s', (box.x0 + box.x1) / 2, box.y1], ['sw', box.x0, box.y1], ['w', box.x0, (box.y0 + box.y1) / 2],
-        ];
+        const bx = sh.vertical ? sh.x1 + pad : sh.x0 - pad, by = sh.y0 - pad;
         return (
           <g key={sh.block} data-section={sh.block}>
-            <rect x={box.x0} y={box.y0} width={box.x1 - box.x0} height={box.y1 - box.y0} rx={unit * 0.6}
+            <rect x={sh.x0 - pad} y={sh.y0 - pad} width={sh.x1 - sh.x0 + 2 * pad} height={sh.y1 - sh.y0 + 2 * pad} rx={unit * 0.6}
               class={`section-box${selected ? ' selected' : ''}`} style={{ stroke: color, fill: color }} />
             {sh.lines.map((l) => (
               <polygon key={l.key} class={`section-line${selected && l.key === sel.key ? ' split-at' : ''}`} points={l.quad.map((p) => `${p.x},${p.y}`).join(' ')}
@@ -420,10 +444,6 @@ function SectionOverlay({ unit, toImage, W, H }: { unit: number; toImage: (e: Po
             ))}
             <circle cx={bx} cy={by} r={unit * 1.7} style={{ fill: color }} class="section-badge" />
             <text x={bx} y={by} font-size={unit * 1.9} class="section-num" text-anchor="middle" dominant-baseline="central">{sh.block + 1}</text>
-            {selected && !sel.merging && handles.map(([h, x, y]) => (
-              <rect key={h} class="section-handle" data-handle={h} x={x - unit * 1.1} y={y - unit * 1.1} width={unit * 2.2} height={unit * 2.2} rx={unit * 0.4}
-                style={{ stroke: color }} onPointerDown={startResize(h, box)} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={() => setResize(null)} />
-            ))}
           </g>
         );
       })}
@@ -431,7 +451,7 @@ function SectionOverlay({ unit, toImage, W, H }: { unit: number; toImage: (e: Po
   );
 }
 
-function SectionBar({ onDone, onDraw, drawing }: { onDone: () => void; onDraw: () => void; drawing: boolean }) {
+function SectionBar({ onDone }: { onDone: () => void }) {
   const s = scan.value!;
   const sel = selection.value;
   const count = new Set((s.lines as LaidOutLine[]).map((l) => l.block)).size;
@@ -440,10 +460,8 @@ function SectionBar({ onDone, onDraw, drawing }: { onDone: () => void; onDraw: (
   const set = (v: Partial<typeof sel>) => (selection.value = { ...sel, ...v });
   return (
     <div class="section-bar" data-testid="section-bar">
-      {drawing ? (
-        <span class="small">Drag a box around the text for the new section…</span>
-      ) : !valid ? (
-        <span class="small">Tap a section to change it; drag its handles to resize its box. Numbers show the reading order.</span>
+      {!valid ? (
+        <span class="small">Tap a section to change it. Numbers show the reading order. To make a new section, close this and use ⬚ Area.</span>
       ) : sel.merging ? (
         <span class="small">Tap the section to merge with section {sel.block + 1}… <button class="button small" onClick={() => set({ merging: false })}>Cancel</button></span>
       ) : (
@@ -460,7 +478,6 @@ function SectionBar({ onDone, onDraw, drawing }: { onDone: () => void; onDraw: (
         </div>
       )}
       <div class="row">
-        <button class={`button small ${drawing ? 'primary' : ''}`} onClick={onDraw} title="Draw a box for a new section" data-testid="sec-new">＋ New</button>
         {s.sectionsEdited && <button class="button small" onClick={() => { resetSections(); set({ block: -1, key: '' }); }} data-testid="sec-reset">Reset</button>}
         <button class="button small primary" onClick={() => { set({ block: -1, key: '', merging: false }); onDone(); }}>Done</button>
       </div>
@@ -501,6 +518,15 @@ function TextPanel({ highlight, onTap, onShowImage }: {
     if (!el) return;
     onTap(Number(el.dataset.i), el.getBoundingClientRect());
   };
+  const readerRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!highlight) return;
+    const id = requestAnimationFrame(() => {
+      const el = readerRef.current?.querySelector(`[data-i="${highlight.start}"]`);
+      if (el && readerRef.current) keepVisible(readerRef.current, el);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [highlight?.start]);
 
   const saveEdit = () => {
     setEditedText(draft);
@@ -538,7 +564,7 @@ function TextPanel({ highlight, onTap, onShowImage }: {
           </div>
         </div>
       ) : (
-        <div class={`reader ${d.vertical ? 'vertical' : ''}`} lang="ja" style={{ fontSize: `${d.fontSize}px` }} onClick={onClick} data-testid="reader">
+        <div ref={readerRef} class={`reader ${d.vertical ? 'vertical' : ''}`} lang="ja" style={{ fontSize: `${d.fontSize}px` }} onClick={onClick} data-testid="reader">
           {empty && !s.busy && <p class="muted small placeholder">{s.error ? s.error : 'No text recognized yet.'}</p>}
           {empty && s.busy && <p class="muted small placeholder">Reading text…</p>}
           {lines.map((ln) => (

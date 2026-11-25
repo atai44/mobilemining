@@ -14,6 +14,8 @@ import { scan, settings, showToast } from '../store';
 import { correctChar } from '../scanActions';
 
 interface Props {
+  /** Shown in a panel next to the page instead of floating over it. */
+  docked?: boolean;
   index: number;
   results: TermResult[];
   anchor: DOMRect;
@@ -24,7 +26,7 @@ interface Props {
 
 type AnkiState = { dupes: number[]; added?: number; busy?: boolean };
 
-export function Popup({ index, results: initialResults, anchor, onClose, onRelookup, onEdit }: Props) {
+export function Popup({ docked, index, results: initialResults, anchor, onClose, onRelookup, onEdit }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [kanji, setKanji] = useState<string | null>(null);
   const [tags, setTags] = useState<Record<string, string>>({});
@@ -37,9 +39,11 @@ export function Popup({ index, results: initialResults, anchor, onClose, onReloo
 
   useEffect(() => { tagDescriptions().then(setTags); }, []);
 
-  // Close when tapping outside the popup and the reader text.
+  // Close when tapping outside the popup and the reader text (floating popup only; the docked
+  // panel stays open while the page is scrolled or zoomed).
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
+      if (docked) return;
       const t = e.target as Element;
       if (ref.current?.contains(t) || t.closest?.('[data-i]') || t.closest?.('.sheet') || t.closest?.('.toast')) return;
       onClose();
@@ -78,6 +82,7 @@ export function Popup({ index, results: initialResults, anchor, onClose, onReloo
   }, [results, index, nested]);
 
   useLayoutEffect(() => {
+    if (docked) return;
     const vw = window.innerWidth, vh = window.innerHeight;
     const nav = document.querySelector('.tabs')?.getBoundingClientRect().height ?? 0;
     const width = Math.min(480, vw - 16);
@@ -127,17 +132,18 @@ export function Popup({ index, results: initialResults, anchor, onClose, onReloo
   return (
     <div
       ref={ref}
-      class="popup"
+      class={`popup${docked ? ' docked' : ''}`}
       role="dialog"
       aria-label="Dictionary"
       data-testid="popup"
       onClick={onClick}
-      style={pos ? { left: `${pos.left}px`, top: pos.top !== undefined ? `${pos.top}px` : undefined, bottom: pos.bottom !== undefined ? `${pos.bottom}px` : undefined, maxHeight: `${pos.maxHeight}px`, width: `${pos.width}px` } : { visibility: 'hidden' }}
+      style={docked ? undefined : pos ? { left: `${pos.left}px`, top: pos.top !== undefined ? `${pos.top}px` : undefined, bottom: pos.bottom !== undefined ? `${pos.bottom}px` : undefined, maxHeight: `${pos.maxHeight}px`, width: `${pos.width}px` } : { visibility: 'hidden' }}
     >
-      {nested && (
+      {(nested || docked) && (
         <div class="popup-nav">
-          <button class="button small" onClick={() => setStack(stack.slice(0, -1))}>← Back</button>
-          <span class="muted small" lang="ja">{stack[stack.length - 1].query}</span>
+          {nested && <button class="button small" onClick={() => setStack(stack.slice(0, -1))}>← Back</button>}
+          <span class="muted small grow" lang="ja">{nested ? stack[stack.length - 1].query : results[0] ? `${results[0].source}` : tapped}</span>
+          {docked && <button class="icon-button small" onClick={onClose} aria-label="Close dictionary" data-testid="close-panel">✕</button>}
         </div>
       )}
       {!nested && meta?.alts?.length ? (

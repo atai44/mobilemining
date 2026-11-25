@@ -79,6 +79,7 @@ export function normalizeText(s: string): string {
     }
     const cp = c.codePointAt(0)!;
     if (cp >= 0xff01 && cp <= 0xff5e) { out += String.fromCodePoint(cp - 0xfee0); continue; }
+    if (c === '·' || c === '•') { out += '・'; continue; }
     out += c;
   }
   return out;

@@ -75,17 +75,32 @@ class LocalEngine {
     return m.geoms;
   }
 
-  /** Counter-clockwise rotation (0/90/180/270) that makes the page upright. */
-  async orientation(canvas: CanvasImageSource & { width: number; height: number }): Promise<{ rotate: number; scores: number[] }> {
+  /**
+   * Counter-clockwise rotation (0/90/180/270) that makes the page upright. Classifies square crops
+   * around the given text lines (photos often have pictures, margins or desks around the text),
+   * or three crops along the page when no lines are given.
+   */
+  async orientation(canvas: CanvasImageSource & { width: number; height: number }, around: Point[][] = []): Promise<{ rotate: number; scores: number[] }> {
     const W = canvas.width, H = canvas.height;
-    // Model preprocessing: short side → 256, centre 224 crop. Three crops along the long side.
-    const side = (Math.min(W, H) * 224) / 256;
-    const long = W >= H;
-    const crops = [0.3, 0.5, 0.7].map((f) => {
-      const cx = long ? W * f : W / 2, cy = long ? H / 2 : H * f;
-      const x = Math.min(Math.max(0, cx - side / 2), W - side), y = Math.min(Math.max(0, cy - side / 2), H - side);
-      return rasterize(canvas, { x, y, w: side, h: side }, 224, 224);
-    });
+    let rects: Rect[];
+    if (around.length) {
+      rects = around.map((q) => {
+        const xs = q.map((p) => p.x), ys = q.map((p) => p.y);
+        const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+        const len = Math.hypot(q[1].x - q[0].x, q[1].y - q[0].y), th = Math.hypot(q[3].x - q[0].x, q[3].y - q[0].y);
+        const side = Math.min(Math.min(W, H), Math.max(len * 1.1, th * 5));
+        return { x: Math.min(Math.max(0, cx - side / 2), W - side), y: Math.min(Math.max(0, cy - side / 2), H - side), w: side, h: side };
+      });
+    } else {
+      // Model preprocessing: short side → 256, centre 224 crop. Three crops along the long side.
+      const side = (Math.min(W, H) * 224) / 256;
+      const long = W >= H;
+      rects = [0.3, 0.5, 0.7].map((f) => {
+        const cx = long ? W * f : W / 2, cy = long ? H / 2 : H * f;
+        return { x: Math.min(Math.max(0, cx - side / 2), W - side), y: Math.min(Math.max(0, cy - side / 2), H - side), w: side, h: side };
+      });
+    }
+    const crops = rects.map((r) => rasterize(canvas, r, 224, 224));
     const m = await this.request<Extract<WorkerResponse, { type: 'oriented' }>>({ type: 'orient', id: this.nextId++, crops }, crops.map((c) => c.data.buffer));
     return { rotate: m.rotate, scores: m.scores };
   }
