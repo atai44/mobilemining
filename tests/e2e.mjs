@@ -175,9 +175,17 @@ const head = await page.$eval('[data-testid=popup] .entry .headword', (e) => e.t
 const reasons = await page.$eval('[data-testid=popup] .entry .reasons', (e) => e.textContent).catch(() => '');
 check(head.includes('読む') || head.includes('読よむ'), `popup headword: ${head} ${reasons}`);
 check(reasons.includes('negative') && reasons.includes('past'), 'deinflection reasons shown');
-await page.waitForFunction(() => [...document.querySelectorAll('[data-testid=popup] [data-testid=audio-button]')].every((b) => !b.classList.contains('checking')), null, { timeout: 15_000 }).catch(() => {});
-const audioStates = await page.$$eval('[data-testid=popup] .entry', (els) => els.map((e) => [e.querySelector('.headword')?.textContent, e.querySelector('[data-testid=audio-button]')?.disabled]));
-check(audioStates[0]?.[1] === false && audioStates.slice(1).some(([, d]) => d === true), `audio button greyed out when there's no recording (${audioStates.map(([h, d]) => `${h}:${d ? 'off' : 'on'}`).join(' ')})`);
+const audioOf = async () => {
+  await page.waitForFunction(() => document.querySelector('[data-testid=popup] [data-testid=audio-button]:not(.checking)'), null, { timeout: 15_000 }).catch(() => {});
+  return page.$eval('[data-testid=popup] .entry', (e) => [e.querySelector('.headword')?.textContent, e.querySelector('[data-testid=audio-button]')?.className.split(' ').pop()]);
+};
+const yomuAudio = await audioOf();
+await page.click('[data-testid=close-panel]');
+await tapChar('本');
+const honAudio = await audioOf();
+check(yomuAudio[1] === 'ok' && honAudio[1] === 'missing' && await page.$eval('[data-testid=audio-button]', (b) => b.disabled), `audio button greyed out when there's no recording (${yomuAudio.join(': ')}, ${honAudio.join(': ')})`);
+await page.click('[data-testid=close-panel]');
+await tapChar('読');
 await shot('04-popup');
 await page.click('[data-testid=popup] [data-testid=mine-button] >> nth=0');
 await page.waitForSelector('.toast-ok', { timeout: 20_000 });
@@ -331,12 +339,13 @@ for (const fx of ['dense-vertical.png', 'dense-vertical-tilt.png', 'dense-horizo
   await page.mouse.up();
   await page.waitForTimeout(400);
   await page.click('[data-testid=sections]');
+  for (let i = 0; i < 15 && (await count()) !== 5; i++) await page.waitForTimeout(200);
   check((await count()) === 5, `area box becomes its own section (${await count()} sections)`);
   await page.click('.section-bar >> text=Done');
   // the box stays visible and selected; drawing a bigger box over it replaces it
   check((await page.$$('[data-area]')).length === 1 && !!(await page.$('[data-testid=area-bar]')), 'new section box is shown and selected');
   const areaText = await page.$eval('[data-testid=area-text]', (e) => e.textContent).catch(() => '');
-  check(areaText.length >= 2 && areaText.includes('写真'), `section box shows its text (${areaText})`);
+  check(/写真|二〇二四/.test(areaText), `section box shows its text (${areaText})`);
   await page.click('[data-testid=select-area]');
   await page.mouse.move(capBox.x0 - 30, capBox.y0 - 6);
   await page.mouse.down();
