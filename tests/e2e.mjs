@@ -46,6 +46,18 @@ page.on('console', (m) => m.type() === 'error' && console.error('[console]', m.t
 const ankiCalls = [];
 const added = new Map(); // first-field value -> note id
 let nextId = 1700000000000;
+// Pronunciation audio: 読む has a recording; every other word gets a clip as long as
+// JapanesePod101's "audio not available" one (5.651 s).
+const silentWav = (seconds) => {
+  const rate = 8000, n = Math.round(seconds * rate), b = Buffer.alloc(44 + n);
+  b.write('RIFF', 0); b.writeUInt32LE(36 + n, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22);
+  b.writeUInt32LE(rate, 24); b.writeUInt32LE(rate, 28); b.writeUInt16LE(1, 32); b.writeUInt16LE(8, 34); b.write('data', 36); b.writeUInt32LE(n, 40); b.fill(128, 44);
+  return b;
+};
+await page.route('https://assets.languagepod101.com/**', (route) => {
+  const u = new URL(route.request().url());
+  route.fulfill({ status: 200, contentType: 'audio/wav', body: silentWav(u.searchParams.get('kanji') === '読む' ? 0.5 : 5.651) });
+});
 await page.route('http://127.0.0.1:8765/**', async (route) => {
   const body = JSON.parse(route.request().postData() ?? '{}');
   ankiCalls.push(body);
@@ -163,6 +175,9 @@ const head = await page.$eval('[data-testid=popup] .entry .headword', (e) => e.t
 const reasons = await page.$eval('[data-testid=popup] .entry .reasons', (e) => e.textContent).catch(() => '');
 check(head.includes('読む') || head.includes('読よむ'), `popup headword: ${head} ${reasons}`);
 check(reasons.includes('negative') && reasons.includes('past'), 'deinflection reasons shown');
+await page.waitForFunction(() => [...document.querySelectorAll('[data-testid=popup] [data-testid=audio-button]')].every((b) => !b.classList.contains('checking')), null, { timeout: 15_000 }).catch(() => {});
+const audioStates = await page.$$eval('[data-testid=popup] .entry', (els) => els.map((e) => [e.querySelector('.headword')?.textContent, e.querySelector('[data-testid=audio-button]')?.disabled]));
+check(audioStates[0]?.[1] === false && audioStates.slice(1).some(([, d]) => d === true), `audio button greyed out when there's no recording (${audioStates.map(([h, d]) => `${h}:${d ? 'off' : 'on'}`).join(' ')})`);
 await shot('04-popup');
 await page.click('[data-testid=popup] [data-testid=mine-button] >> nth=0');
 await page.waitForSelector('.toast-ok', { timeout: 20_000 });
@@ -320,6 +335,8 @@ for (const fx of ['dense-vertical.png', 'dense-vertical-tilt.png', 'dense-horizo
   await page.click('.section-bar >> text=Done');
   // the box stays visible and selected; drawing a bigger box over it replaces it
   check((await page.$$('[data-area]')).length === 1 && !!(await page.$('[data-testid=area-bar]')), 'new section box is shown and selected');
+  const areaText = await page.$eval('[data-testid=area-text]', (e) => e.textContent).catch(() => '');
+  check(areaText.length >= 2 && areaText.includes('写真'), `section box shows its text (${areaText})`);
   await page.click('[data-testid=select-area]');
   await page.mouse.move(capBox.x0 - 30, capBox.y0 - 6);
   await page.mouse.down();
@@ -495,6 +512,21 @@ await shot('08b-zoomed');
   await page.mouse.move(h.x, h.y); await page.mouse.down(); await page.mouse.move(h.x - 50, h.y, { steps: 4 }); await page.mouse.up();
   await page.waitForTimeout(250);
   check((await w()) > wa + 30, 'the new box\'s handles respond');
+  // A small box, still selected: drawing a bigger box that starts on it replaces it (its handles don't catch the drag)
+  {
+    await page.click('[data-testid=area-delete]');
+    const ids = () => page.$$eval('[data-area]', (els) => els.map((e) => e.dataset.area));
+    const z = { x: r.x + r.w * 0.15, y: r.y + r.h * 0.55 };
+    await page.click('[data-testid=select-area]');
+    await page.mouse.move(z.x, z.y); await page.mouse.down(); await page.mouse.move(z.x + 40, z.y + 40, { steps: 3 }); await page.mouse.up();
+    await page.waitForTimeout(300);
+    const [smallId] = await ids();
+    await page.click('[data-testid=select-area]');
+    await page.mouse.move(z.x + 20, z.y + 20); await page.mouse.down(); await page.mouse.move(z.x + 180, z.y + 160, { steps: 6 }); await page.mouse.up();
+    await page.waitForTimeout(400);
+    const after = await ids();
+    check(!!smallId && after.length === 1 && after[0] !== smallId, `drawing over a small selected box replaces it (${smallId} → ${after.join(', ')})`);
+  }
   await page.click('[data-testid=area-delete]');
   await cdp.detach();
 }

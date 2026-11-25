@@ -329,7 +329,7 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
   return (
     <section class="image-reader">
       <div class="toolbar">
-        <button class={`button small ${draw === 'area' ? 'primary' : ''}`} onClick={() => { setSections(false); setDraw(draw === 'area' ? null : 'area'); }} title="New section" data-testid="select-area">
+        <button class={`button small ${draw === 'area' ? 'primary' : ''}`} onClick={() => { setSections(false); setSelArea(null); setDraw(draw === 'area' ? null : 'area'); }} title="New section" data-testid="select-area">
           ⬚ {draw === 'area' ? 'Drag…' : 'Area'}
         </button>
         <button class={`button small ${sections ? 'primary' : ''}`} onClick={() => { setDraw(null); setSections(!sections); }} title="Sections" data-testid="sections">
@@ -382,9 +382,17 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
             {s.pending.map((p) => (
               <polygon key={p.key} class={`pending${p.busy ? ' busy' : ''}`} points={p.quad.map((q) => `${q.x},${q.y}`).join(' ')} />
             ))}
-            {!sections && s.lines.map((l, i) => (
-              <polygon key={`l${l.key ?? i}`} class="line-box" points={l.quad.map((p) => `${p.x},${p.y}`).join(' ')} />
-            ))}
+            {/* Line outlines in their section's colour, on a light halo so they show on any background. */}
+            {!sections && s.lines.map((l, i) => {
+              const pts = l.quad.map((p) => `${p.x},${p.y}`).join(' ');
+              const block = (l as LaidOutLine).block ?? 0;
+              return (
+                <g key={`l${l.key ?? i}`}>
+                  <polygon class="line-halo" points={pts} />
+                  <polygon class="line-box" points={pts} style={{ stroke: SECTION_COLORS[block % SECTION_COLORS.length] }} />
+                </g>
+              );
+            })}
             {!sections && cells.map((c) => (
               <polygon
                 key={c.i}
@@ -403,6 +411,7 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
                 svgRef={svgRef}
                 W={W}
                 selected={selArea}
+                drawing={selecting}
                 flash={flash}
                 onSelect={setSelArea}
               />
@@ -476,10 +485,12 @@ function dragArea(d: AreaDrag, p: Point): AreaGeom {
   return { ...g, w, h, cx: g.cx + c.x, cy: g.cy + c.y };
 }
 
-function AreaLayer({ svgRef, W, selected, flash, onSelect }: {
+function AreaLayer({ svgRef, W, selected, drawing, flash, onSelect }: {
   svgRef: { current: SVGSVGElement | null };
   W: number;
   selected: string | null;
+  /** A new box is being drawn: existing boxes must not catch the drag. */
+  drawing: boolean;
   flash: string | null;
   onSelect: (id: string | null) => void;
 }) {
@@ -511,7 +522,7 @@ function AreaLayer({ svgRef, W, selected, flash, onSelect }: {
   };
   const handlers = { onPointerMove: move, onPointerUp: end, onPointerCancel: () => { drag.current = null; setLive(null); } };
   return (
-    <g class="areas">
+    <g class={`areas${drawing ? ' drawing' : ''}`}>
       {/* The selected box is drawn last, so nothing else can sit on top of its handles. */}
       {[...s.areas.filter((x) => x.id !== selected), ...s.areas.filter((x) => x.id === selected)].map((info) => {
         const a = live?.id === info.id ? { ...info, ...live.geom } : info;
@@ -529,6 +540,7 @@ function AreaLayer({ svgRef, W, selected, flash, onSelect }: {
         ];
         return (
           <g key={info.id} data-area={info.id}>
+            <polygon class={`box-halo${sel ? ' selected' : ''}`} points={pts.map((p) => `${p.x},${p.y}`).join(' ')} />
             <polygon class={`area-box${sel ? ' selected' : ''}${flash === info.id ? ' flash' : ''}${info.count ? '' : ' empty'}`} points={pts.map((p) => `${p.x},${p.y}`).join(' ')} style={{ stroke: color, fill: color }} />
             <g class="area-badge" onClick={(e) => { e.stopPropagation(); onSelect(sel ? null : info.id); }} data-testid="area-badge">
               <circle cx={pts[0].x} cy={pts[0].y} r={px(13)} style={{ fill: color }} />
@@ -559,13 +571,31 @@ function AreaLayer({ svgRef, W, selected, flash, onSelect }: {
   );
 }
 
+/** Text of one section (its lines joined), as read so far. */
+function sectionText(s: NonNullable<typeof scan.value>, section: number): string {
+  if (section < 0) return '';
+  const parts: string[] = [];
+  let prev = -1;
+  s.text.forEach((c, i) => {
+    const li = s.lineOf[i];
+    if (li < 0 || (s.lines[li] as LaidOutLine).block !== section) return;
+    if (prev >= 0 && li !== prev) parts.push(' ');
+    parts.push(c);
+    prev = li;
+  });
+  return parts.join('');
+}
+
 function AreaBar({ id, onDone }: { id: string; onDone: () => void }) {
-  const info = scan.value!.areas.find((a) => a.id === id);
+  const s = scan.value!;
+  const info = s.areas.find((a) => a.id === id);
   if (!info) return null;
+  const text = sectionText(s, info.section);
   return (
     <div class="section-bar" data-testid="area-bar">
-      <span class="small">
+      <span class="small area-summary">
         <b>{info.section >= 0 ? `§${info.section + 1}` : '∅'}</b> · {info.count} line{info.count === 1 ? '' : 's'}
+        {text && <span class="area-text" lang="ja" data-testid="area-text">{text}</span>}
       </span>
       <div class="row">
         <button class="button small" onClick={() => rereadArea(id)} title="Re-read" data-testid="area-reread">↻</button>
@@ -595,6 +625,8 @@ function SectionOverlay({ unit }: { unit: number }) {
         const bx = sh.vertical ? sh.x1 + pad : sh.x0 - pad, by = sh.y0 - pad;
         return (
           <g key={sh.block} data-section={sh.block}>
+            <rect x={sh.x0 - pad} y={sh.y0 - pad} width={sh.x1 - sh.x0 + 2 * pad} height={sh.y1 - sh.y0 + 2 * pad} rx={unit * 0.6}
+              class={`box-halo${selected ? ' selected' : ''}`} />
             <rect x={sh.x0 - pad} y={sh.y0 - pad} width={sh.x1 - sh.x0 + 2 * pad} height={sh.y1 - sh.y0 + 2 * pad} rx={unit * 0.6}
               class={`section-box${selected ? ' selected' : ''}`} style={{ stroke: color, fill: color }} />
             {sh.lines.map((l) => (

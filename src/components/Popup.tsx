@@ -3,6 +3,7 @@ import type { Definition, TermResult } from '../lib/lookup';
 import { getKanji, tagDescriptions, type Kanji } from '../lib/db';
 import { furiganaSegments, isKanji } from '../lib/kana';
 import { audioUrl, findDuplicates, viewNote } from '../lib/anki';
+import { checkAudio, playAudio, type AudioStatus } from '../lib/audio';
 import { renderGlossaryItem } from '../lib/yomitan/render';
 import { dictionaryTags, lookupYKanji, resolveMediaImages } from '../lib/yomitan/query';
 import type { YKanji, YKanjiMeta } from '../lib/yomitan/types';
@@ -189,10 +190,15 @@ function EntryView({ r, tags, anki, onKanji, onAdd, onEdit, onView, canMine }: {
   onAdd: (force?: 'new' | 'overwrite') => void; onEdit: () => void; onView: (id: number) => void; canMine: boolean;
 }) {
   const st = settings.value;
-  const play = () => {
-    const a = new Audio(audioUrl(r.expression, r.reading));
-    a.play().catch(() => {});
-  };
+  const url = audioUrl(r.expression, r.reading);
+  const [audio, setAudio] = useState<AudioStatus>('checking');
+  useEffect(() => {
+    let live = true;
+    const c = checkAudio(url);
+    setAudio(c.status);
+    c.ready.then((s) => live && setAudio(s));
+    return () => { live = false; };
+  }, [url]);
   const segs = furiganaSegments(r.expression, r.reading);
   const isAnki = st.anki.method === 'ankiconnect';
   const dupe = isAnki && (anki?.dupes.length ?? 0) > 0;
@@ -233,7 +239,7 @@ function EntryView({ r, tags, anki, onKanji, onAdd, onEdit, onView, canMine }: {
           )}
         </div>
         <div class="entry-actions">
-          <button class="icon-button" onClick={play} title="Play audio" aria-label="Play audio">🔊</button>
+          <button class={`icon-button audio ${audio}`} onClick={() => playAudio(url)} disabled={audio === 'missing'} title={audio === 'missing' ? 'No audio' : 'Play audio'} aria-label="Play audio" data-testid="audio-button">🔊</button>
           {canMine && viewId !== undefined && isAnki && (
             <button class="icon-button" onClick={() => onView(viewId)} title="View note" aria-label="View note" data-testid="view-note">📖</button>
           )}
