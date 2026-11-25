@@ -123,8 +123,8 @@ export function Popup({ docked, index, results: initialResults, anchor, onClose,
     const out = await quickMine(r, index, force);
     setAnki((p) => ({ ...p, [k]: { ...(p[k] ?? { dupes: [] }), busy: false, added: out.sent?.noteId } }));
     if (out.error) showToast(out.error, 'error');
-    else if (out.sent) showToast(`${out.sent.action === 'updated' ? 'Updated' : 'Added'} 「${r.expression}」 in Anki`, 'ok');
-    else if (st.anki.method === 'local') showToast(`Saved 「${r.expression}」 — export from the Mined tab`, 'ok');
+    else if (out.sent) showToast(`${out.sent.action === 'updated' ? 'Updated' : 'Added'} 「${r.expression}」`, 'ok');
+    else if (st.anki.method === 'local') showToast(`Saved 「${r.expression}」`, 'ok');
   };
 
   const view = (id: number) => viewNote(settings.value, id).catch((e) => showToast(String(e.message ?? e), 'error'));
@@ -148,7 +148,7 @@ export function Popup({ docked, index, results: initialResults, anchor, onClose,
       )}
       {!nested && meta?.alts?.length ? (
         <div class="ocr-alts">
-          <span class="muted small">OCR read <b lang="ja">{tapped}</b> {Math.round(meta.p * 100)}% · did you mean</span>
+          <span class="muted small" data-testid="ocr-status"><b lang="ja">{tapped}</b> {meta.fixed === 'user' ? 'selected' : meta.fixed === 'furigana' ? 'furigana' : `${Math.round(meta.p * 100)}%`}</span>
           {meta.alts.map((a) => (
             <button key={a.c} class="alt" lang="ja" onClick={() => replaceChar(a.c)} title={`${Math.round(a.p * 100)}%`}>
               {a.c}
@@ -160,8 +160,8 @@ export function Popup({ docked, index, results: initialResults, anchor, onClose,
         <KanjiCard c={kanji} onBack={() => setKanji(null)} />
       ) : results.length === 0 ? (
         <div class="empty">
-          <p>No dictionary match for <b lang="ja">{nested ? stack[stack.length - 1].query : tapped}</b>.</p>
-          {!nested && isKanji(tapped) && <button class="button small" onClick={() => setKanji(tapped)}>Kanji info</button>}
+          <p class="muted">No match</p>
+          {!nested && isKanji(tapped) && <button class="button small" onClick={() => setKanji(tapped)}>Kanji</button>}
         </div>
       ) : (
         results.map((r) => (
@@ -235,17 +235,17 @@ function EntryView({ r, tags, anki, onKanji, onAdd, onEdit, onView, canMine }: {
         <div class="entry-actions">
           <button class="icon-button" onClick={play} title="Play audio" aria-label="Play audio">🔊</button>
           {canMine && viewId !== undefined && isAnki && (
-            <button class="icon-button" onClick={() => onView(viewId)} title="View note in Anki" aria-label="View note in Anki" data-testid="view-note">📖</button>
+            <button class="icon-button" onClick={() => onView(viewId)} title="View note" aria-label="View note" data-testid="view-note">📖</button>
           )}
           {canMine && (
-            <button class="icon-button" onClick={onEdit} title="Edit before adding" aria-label="Edit card" data-testid="edit-button">✎</button>
+            <button class="icon-button" onClick={onEdit} title="Edit" aria-label="Edit card" data-testid="edit-button">✎</button>
           )}
           {canMine && (
             <button
               class={`icon-button mine ${dupe && !anki?.added ? 'dupe' : ''} ${anki?.added ? 'done' : ''}`}
               disabled={anki?.busy || (dupe && behavior === 'prevent') || anki?.added !== undefined}
               onClick={() => onAdd()}
-              title={anki?.added !== undefined ? 'Added' : dupe ? (behavior === 'overwrite' ? 'Already in Anki — tap to overwrite' : behavior === 'prevent' ? 'Already in Anki' : 'Already in Anki — tap to add another') : 'Add to Anki'}
+              title={anki?.added !== undefined ? 'Added' : dupe ? (behavior === 'overwrite' ? 'In Anki · overwrite' : behavior === 'prevent' ? 'In Anki' : 'In Anki · add again') : 'Add'}
               aria-label="Mine"
               data-testid="mine-button"
             >
@@ -352,7 +352,7 @@ function KanjiCard({ c, onBack }: { c: string; onBack: () => void }) {
               {k.na?.length ? <p><span class="muted">Nanori</span> <span lang="ja">{k.na.join('、')}</span></p> : null}
             </>
           ) : k === null && !yk.kanji.length ? (
-            <p class="muted">Not in any kanji dictionary.</p>
+            <p class="muted">Not found</p>
           ) : null}
         </div>
       </div>

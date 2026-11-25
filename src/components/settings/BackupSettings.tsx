@@ -21,7 +21,7 @@ export function BackupSettings() {
   const keep = async () => {
     const ok = await navigator.storage?.persist?.().catch(() => false);
     await refresh();
-    showToast(ok ? 'The browser will keep your data' : 'The browser declined. Installing the app (Add to Home Screen) usually helps.', ok ? 'ok' : 'info');
+    showToast(ok ? '✓' : 'Declined · try Add to Home Screen', ok ? 'ok' : 'info');
   };
 
   const exportBackup = async () => {
@@ -33,7 +33,7 @@ export function BackupSettings() {
       a.download = `mobilemining-backup-${new Date().toISOString().slice(0, 10)}.zip`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-      showToast(`Backup saved (${mb(blob.size)})`, 'ok');
+      showToast(mb(blob.size), 'ok');
     } catch (e) {
       showToast(String((e as Error).message ?? e), 'error');
     } finally {
@@ -53,12 +53,12 @@ export function BackupSettings() {
       }
       await refreshDictionaries();
       setReport([
-        r.settings ? '✓ Settings and Anki setup' : '',
-        `✓ ${r.notes} mined card${r.notes === 1 ? '' : 's'}`,
-        r.dictionaries.length ? `✓ Dictionaries: ${r.dictionaries.join(', ')}` : '',
+        r.settings ? '✓ Settings' : '',
+        `✓ ${r.notes} mined`,
+        r.dictionaries.length ? `✓ ${r.dictionaries.join(', ')}` : '',
         ...r.errors.map((e) => `⚠ ${e}`),
       ].filter(Boolean));
-      showToast('Backup restored', 'ok');
+      showToast('Restored', 'ok');
       refresh();
     } catch (e) {
       showToast(String((e as Error).message ?? e), 'error');
@@ -69,28 +69,21 @@ export function BackupSettings() {
 
   return (
     <section class="card" data-testid="backup">
-      <h2>Your data</h2>
-      <p class="small">
-        Everything (dictionaries, settings, mined cards) is stored only in this browser on this device. It stays when the app is
-        updated; nothing is uploaded anywhere.
-        {status?.usage != null && <> Using {mb(status.usage)}.</>}
-      </p>
+      <h2>Backup</h2>
+      <p class="small muted">This device only{status?.usage != null && <> · {mb(status.usage)}</>}{status?.persisted && <span class="ok-text"> · ✓ persistent</span>}</p>
       {status?.persisted === false && (
         <div class="notice-inline small">
-          ⚠ The browser may clear this data when space runs low (or, on iPhone, after a week without use unless the app is on
-          your home screen).{' '}
-          <button class="button small" onClick={keep} data-testid="persist">Keep my data</button>
+          ⚠ May be cleared by the browser{' '}
+          <button class="button small" onClick={keep} data-testid="persist">Keep</button>
         </div>
       )}
-      {status?.persisted && <p class="small ok-text">✓ The browser will keep this data.</p>}
-      <p class="small muted">To move to another device or browser, or as insurance, save a backup file and restore it there.</p>
-      <Toggle label="Include imported dictionaries (larger file)" checked={withDicts} onChange={setWithDicts} />
+      <Toggle label="Include dictionaries" checked={withDicts} onChange={setWithDicts} />
       {progress ? (
         <p class="small">{progress}</p>
       ) : (
         <div class="row wrap">
-          <button class="button primary" onClick={exportBackup} data-testid="export-backup">Save backup file</button>
-          <button class="button" onClick={() => fileRef.current?.click()} data-testid="restore-backup">Restore from backup…</button>
+          <button class="button primary" onClick={exportBackup} data-testid="export-backup">Export</button>
+          <button class="button" onClick={() => fileRef.current?.click()} data-testid="restore-backup">Restore…</button>
         </div>
       )}
       <input ref={fileRef} type="file" accept=".zip,application/zip" hidden data-testid="backup-file" onChange={(e) => {

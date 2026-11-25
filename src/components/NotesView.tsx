@@ -48,14 +48,14 @@ export function NotesView() {
   return (
     <div class="page">
       <header class="page-header">
-        <h1>Mined cards</h1>
+        <h1>Mined</h1>
         <p class="muted">{notes.length} card{notes.length === 1 ? '' : 's'} · {pendingCount} not yet in Anki</p>
       </header>
       <div class="row wrap">
-        {canSend && <button class="button primary" disabled={busy || !pendingCount} onClick={sendPending}>{busy ? 'Sending…' : `Send ${pendingCount} to Anki`}</button>}
-        <button class="button" disabled={!notes.length} onClick={exportTsv} title="Import into Anki with File → Import">Export TSV</button>
+        {canSend && <button class="button primary" disabled={busy || !pendingCount} onClick={sendPending}>{busy ? 'Sending…' : `Send ${pendingCount}`}</button>}
+        <button class="button" disabled={!notes.length} onClick={exportTsv} title="Anki: File → Import">TSV ↓</button>
       </div>
-      {!notes.length && <p class="muted center">Cards you mine appear here.</p>}
+      {!notes.length && <p class="muted center">Empty</p>}
       <ul class="note-list">
         {notes.map((n) => (
           <NoteItem key={n.id} n={n} canSend={canSend} onView={n.ankiNoteId && canSend ? () => viewNote(st, n.ankiNoteId!).catch((e) => showToast(String(e.message ?? e), 'error')) : undefined} onSend={async () => { await send(n); reload(); }} onDelete={async () => { await deleteNote(n.id!); reload(); }} />
@@ -86,8 +86,8 @@ function NoteItem({ n, canSend, onSend, onDelete, onView }: { n: MinedNote; canS
         {n.error && <div class="error small">{n.error}</div>}
         <div class="row">
           {canSend && n.status !== 'added' && <button class="button small" onClick={onSend}>Send</button>}
-          {onView && <button class="button small" onClick={onView}>View in Anki</button>}
-          <button class="button small danger" onClick={() => confirm('Delete this card?') && onDelete()}>Delete</button>
+          {onView && <button class="button small" onClick={onView} title="View in Anki">📖</button>}
+          <button class="button small danger" onClick={() => confirm('Delete?') && onDelete()} title="Delete">🗑</button>
         </div>
       </div>
     </li>

@@ -46,7 +46,7 @@ export function DictionarySettings() {
     try {
       await installDictionaries(BASE, (stage, done, total) => setProgress({ stage, done, total }));
       await refreshDicts();
-      showToast('Built-in dictionary installed', 'ok');
+      showToast('Installed', 'ok');
     } catch (e) {
       showToast(String((e as Error).message ?? e), 'error');
     } finally {
@@ -63,10 +63,7 @@ export function DictionarySettings() {
   return (
     <section class="card" data-testid="dictionaries">
       <h2>Dictionaries</h2>
-      <p class="muted small">
-        Import any dictionary made for Yomitan (.zip): term dictionaries such as Jitendex, frequency lists, pitch-accent and kanji dictionaries.
-        Results from all enabled dictionaries are merged; order sets priority.
-      </p>
+      <p class="muted small">Yomitan .zip · top = first</p>
       <ul class="dict-list">
         {list.map((d, i) => {
           const rec = installed.get(d.name);
@@ -103,8 +100,8 @@ export function DictionarySettings() {
         </div>
       ) : (
         <div class="row wrap">
-          <button class="button primary" onClick={() => fileRef.current?.click()} data-testid="import-dict">Import dictionary (.zip)</button>
-          <button class="button" onClick={installBuiltin}>{builtin.jmdict ? 'Update built-in JMdict' : 'Install built-in JMdict'}</button>
+          <button class="button primary" onClick={() => fileRef.current?.click()} data-testid="import-dict">Import .zip</button>
+          <button class="button" onClick={installBuiltin}>{builtin.jmdict ? 'Update JMdict' : 'Install JMdict'}</button>
         </div>
       )}
       <input

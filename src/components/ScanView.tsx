@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { signal } from '@preact/signals';
 import { scan, settings, updateSettings, view, showToast, ocrState, locate, indexOf } from '../store';
 import {
-  runOcr, rotateScan, startAnalysis, focusAt, setEditedText,
+  runOcr, rotateScan, startAnalysis, focusAt, setEditedText, showPdfPage,
   mergeSections, moveSection, deleteSection, redirectSection, resetSections,
   rereadSection, createArea, updateArea, deleteArea, rereadArea, areaCorners, type Area,
 } from '../scanActions';
@@ -95,7 +95,7 @@ export function ScanView() {
       </div>
       {livePopup && (
         <div class="dict-panel" data-testid="dict-panel">
-          <div class="panel-grip" onPointerDown={startResize} title="Drag to resize" aria-label="Resize dictionary panel" />
+          <div class="panel-grip" onPointerDown={startResize} aria-label="Resize" />
           <Popup
             docked
             key={(livePopup.pos ? livePopup.pos.key + ':' + livePopup.pos.ci : livePopup.index) + ':' + livePopup.results.length}
@@ -273,7 +273,7 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
       setTimeout(() => setFlash((f) => (f === a.id ? null : f)), 1400);
       reading.then(() => {
         const info = scan.value?.areas.find((x) => x.id === a.id);
-        showToast(info && info.count ? `Section ${info.section + 1} · ${info.count} line${info.count === 1 ? '' : 's'}` : 'No text found in that box', info?.count ? 'ok' : 'info');
+        showToast(info && info.count ? `§${info.section + 1} · ${info.count} line${info.count === 1 ? '' : 's'}` : 'No text', info?.count ? 'ok' : 'info');
       });
     }
   };
@@ -329,13 +329,13 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
   return (
     <section class="image-reader">
       <div class="toolbar">
-        <button class={`button small ${draw === 'area' ? 'primary' : ''}`} onClick={() => { setSections(false); setDraw(draw === 'area' ? null : 'area'); }} title="Drag a box around the text you want: it becomes its own section" data-testid="select-area">
+        <button class={`button small ${draw === 'area' ? 'primary' : ''}`} onClick={() => { setSections(false); setDraw(draw === 'area' ? null : 'area'); }} title="New section" data-testid="select-area">
           ⬚ {draw === 'area' ? 'Drag…' : 'Area'}
         </button>
-        <button class={`button small ${sections ? 'primary' : ''}`} onClick={() => { setDraw(null); setSections(!sections); }} title="Fix how the page is split into sections and their reading order" data-testid="sections">
+        <button class={`button small ${sections ? 'primary' : ''}`} onClick={() => { setDraw(null); setSections(!sections); }} title="Sections" data-testid="sections">
           § Sections
         </button>
-        <button class="button small" onClick={() => startAnalysis()} title="Read the whole photo again">↻</button>
+        <button class="button small" onClick={() => startAnalysis()} title="Re-read">↻</button>
         <button class="button small" onClick={() => rotateScan()} title="Rotate 90°">⟳</button>
         <select class="small" value={orientation} onChange={(e) => setOrientation((e.target as HTMLSelectElement).value as Orientation)} title="Text direction">
           <option value="auto">Auto</option>
@@ -343,13 +343,20 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
           <option value="vertical">縦</option>
         </select>
         <span class="spacer" />
+        {s.doc && s.doc.pages > 1 && (
+          <span class="pager" data-testid="pager">
+            <button class="button small" disabled={s.doc.page <= 1} onClick={() => showPdfPage(s.doc!.page - 1)} aria-label="Previous page">‹</button>
+            <span class="small">{s.doc.page}/{s.doc.pages}</span>
+            <button class="button small" disabled={s.doc.page >= s.doc.pages} onClick={() => showPdfPage(s.doc!.page + 1)} aria-label="Next page" data-testid="next-page">›</button>
+          </span>
+        )}
         <button class="button small zoom-btn" onClick={() => zoomAt(zoom / 1.4, ...centre())} title="Zoom out">−</button>
         <button class="button small zoom-btn" onClick={() => zoomAt(zoom * 1.4, ...centre())} title="Zoom in">+</button>
-        <button class="button small" onClick={() => { const [x, y] = centre(); zoomAt(Math.abs(zoom - fit) < 0.01 ? 1 : fit, x, y); }} title="Fit page / fit width">⤢</button>
-        <button class="button small" onClick={onShowText} title="Show the recognized text" data-testid="show-text">Aa</button>
+        <button class="button small" onClick={() => { const [x, y] = centre(); zoomAt(Math.abs(zoom - fit) < 0.01 ? 1 : fit, x, y); }} title="Fit">⤢</button>
+        <button class="button small" onClick={onShowText} title="Text" data-testid="show-text">Aa</button>
       </div>
       <ProgressBar />
-      {edited && <div class="banner small">You edited the text, so it no longer lines up with the photo. Look words up in the text view (Aa), or press ↻ to read the photo again.</div>}
+      {edited && <div class="banner small">Edited text · ↻ to re-read</div>}
       <div
         class={`image-scroll ${selecting ? 'selecting' : ''}`}
         ref={scrollRef}
@@ -405,7 +412,7 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
       </div>
       {sections && <SectionBar onDone={() => { setDraw(null); setSections(false); }} />}
       {!sections && selArea && <AreaBar id={selArea} onDone={() => setSelArea(null)} />}
-      {!pg || pg.phase !== 'done' || s.lines.length || s.busy ? null : <div class="banner small">{s.error ?? 'No text found. Try ⬚ Area around the text, or retake the photo closer.'}</div>}
+      {!pg || pg.phase !== 'done' || s.lines.length || s.busy ? null : <div class="banner small">{s.error ?? 'No text found'}</div>}
     </section>
   );
 }
@@ -416,12 +423,12 @@ function ProgressBar() {
   const ocr = ocrState.value;
   let label = '';
   let frac: number | undefined;
-  if (s.busy) label = 'Reading selected area…';
+  if (s.busy) label = 'Reading…';
   else if (pg?.phase === 'models') {
-    label = ocr.total ? `Loading OCR models ${((ocr.loaded ?? 0) / 1e6).toFixed(0)}/${(ocr.total / 1e6).toFixed(0)} MB` : 'Loading OCR models…';
+    label = ocr.total ? `OCR ${((ocr.loaded ?? 0) / 1e6).toFixed(0)}/${(ocr.total / 1e6).toFixed(0)} MB` : 'OCR…';
     frac = ocr.total ? (ocr.loaded ?? 0) / ocr.total : undefined;
   } else if (pg?.phase === 'detect') label = 'Finding text…';
-  else if (pg?.phase === 'read' && pg.total) { label = `Reading ${pg.done}/${pg.total} lines — tap anywhere to read that part first`; frac = pg.done / pg.total; }
+  else if (pg?.phase === 'read' && pg.total) { label = `Reading ${pg.done}/${pg.total}`; frac = pg.done / pg.total; }
   else if (pg?.phase === 'error') label = s.error ?? 'OCR failed';
   if (!label) return null;
   return (
@@ -558,11 +565,11 @@ function AreaBar({ id, onDone }: { id: string; onDone: () => void }) {
   return (
     <div class="section-bar" data-testid="area-bar">
       <span class="small">
-        <b>{info.section >= 0 ? `Section ${info.section + 1}` : 'Empty box'}</b> · {info.count} line{info.count === 1 ? '' : 's'} — drag the handles to stretch, ⟲ to rotate, ✥ to move
+        <b>{info.section >= 0 ? `§${info.section + 1}` : '∅'}</b> · {info.count} line{info.count === 1 ? '' : 's'}
       </span>
       <div class="row">
-        <button class="button small" onClick={() => rereadArea(id)} data-testid="area-reread">↻ Re-read</button>
-        <button class="button small danger" onClick={() => { deleteArea(id); onDone(); }} data-testid="area-delete">🗑 Remove</button>
+        <button class="button small" onClick={() => rereadArea(id)} title="Re-read" data-testid="area-reread">↻</button>
+        <button class="button small danger" onClick={() => { deleteArea(id); onDone(); }} title="Remove" data-testid="area-delete">🗑</button>
         <button class="button small primary" onClick={onDone}>Done</button>
       </div>
     </div>
@@ -612,19 +619,19 @@ function SectionBar({ onDone }: { onDone: () => void }) {
   return (
     <div class="section-bar" data-testid="section-bar">
       {!valid ? (
-        <span class="small">Tap a section to change it. Numbers show the reading order. To make a new section, close this and use ⬚ Area.</span>
+        <span class="small muted">Tap a section</span>
       ) : sel.merging ? (
-        <span class="small">Tap the section to merge with section {sel.block + 1}… <button class="button small" onClick={() => set({ merging: false })}>Cancel</button></span>
+        <span class="small">Merge §{sel.block + 1} with… <button class="button small" onClick={() => set({ merging: false })}>Cancel</button></span>
       ) : (
         <div class="row wrap">
           <b class="small">§{sel.block + 1}</b>
-          <button class="button small" disabled={sel.block === 0} onClick={() => { moveSection(sel.block, -1); set({ block: sel.block - 1 }); }} title="Read earlier" data-testid="sec-earlier">◀ Earlier</button>
-          <button class="button small" disabled={sel.block >= count - 1} onClick={() => { moveSection(sel.block, 1); set({ block: sel.block + 1 }); }} title="Read later" data-testid="sec-later">Later ▶</button>
-          <button class="button small" onClick={() => set({ merging: true })} data-testid="sec-merge">Merge…</button>
-          <button class="button small" onClick={() => rereadSection(sel.block)} title="Read this box again (finds text that was missed)" data-testid="sec-reread">↻ Re-read box</button>
-          <button class="button small" onClick={() => redirectSection(sel.block, 'vertical')} title="Re-read this section as vertical text" data-testid="sec-vertical">縦</button>
-          <button class="button small" onClick={() => redirectSection(sel.block, 'horizontal')} title="Re-read this section as horizontal text" data-testid="sec-horizontal">横</button>
-          <button class="button small danger" onClick={() => { deleteSection(sel.block); set({ block: -1, key: '' }); }} title="Ignore this section" data-testid="sec-delete">🗑</button>
+          <button class="button small" disabled={sel.block === 0} onClick={() => { moveSection(sel.block, -1); set({ block: sel.block - 1 }); }} title="Read earlier" data-testid="sec-earlier">◀</button>
+          <button class="button small" disabled={sel.block >= count - 1} onClick={() => { moveSection(sel.block, 1); set({ block: sel.block + 1 }); }} title="Read later" data-testid="sec-later">▶</button>
+          <button class="button small" onClick={() => set({ merging: true })} title="Merge" data-testid="sec-merge">⊕</button>
+          <button class="button small" onClick={() => rereadSection(sel.block)} title="Re-read" data-testid="sec-reread">↻</button>
+          <button class="button small" onClick={() => redirectSection(sel.block, 'vertical')} title="Vertical" data-testid="sec-vertical">縦</button>
+          <button class="button small" onClick={() => redirectSection(sel.block, 'horizontal')} title="Horizontal" data-testid="sec-horizontal">横</button>
+          <button class="button small danger" onClick={() => { deleteSection(sel.block); set({ block: -1, key: '' }); }} title="Remove" data-testid="sec-delete">🗑</button>
         </div>
       )}
       <div class="row">
@@ -696,12 +703,12 @@ function TextPanel({ highlight, onTap, onShowImage }: {
   return (
     <section class="text-panel">
       <div class="toolbar">
-        {onShowImage && <button class="button small" onClick={onShowImage} data-testid="show-image">🖼 Photo</button>}
-        <button class="button small" onClick={() => updateSettings((st) => (st.display.vertical = !st.display.vertical))} title="Toggle vertical text">
+        {onShowImage && <button class="button small" onClick={onShowImage} title="Photo" data-testid="show-image">🖼</button>}
+        <button class="button small" onClick={() => updateSettings((st) => (st.display.vertical = !st.display.vertical))} title="Direction">
           {d.vertical ? '横' : '縦'}
         </button>
-        <button class="button small" onClick={() => { setDraft(s.text.join('')); setEditing(!editing); }}>✎ Edit</button>
-        <button class="button small" onClick={copy} disabled={empty}>⧉</button>
+        <button class="button small" onClick={() => { setDraft(s.text.join('')); setEditing(!editing); }} title="Edit">✎</button>
+        <button class="button small" onClick={copy} disabled={empty} title="Copy">⧉</button>
         <span class="spacer" />
         {s.timing !== undefined && <span class="muted small">{(s.timing / 1000).toFixed(1)}s</span>}
       </div>
@@ -715,8 +722,8 @@ function TextPanel({ highlight, onTap, onShowImage }: {
         </div>
       ) : (
         <div ref={readerRef} class={`reader ${d.vertical ? 'vertical' : ''}`} lang="ja" style={{ fontSize: `${d.fontSize}px` }} onClick={onClick} data-testid="reader">
-          {empty && !s.busy && <p class="muted small placeholder">{s.error ? s.error : 'No text recognized yet.'}</p>}
-          {empty && s.busy && <p class="muted small placeholder">Reading text…</p>}
+          {empty && !s.busy && <p class="muted small placeholder">{s.error ? s.error : 'No text'}</p>}
+          {empty && s.busy && <p class="muted small placeholder">Reading…</p>}
           {lines.map((ln) => (
             <p class={`line ${ln.chars.length ? '' : 'blank'}`} key={ln.start}>
               {renderLine(ln.start, ln.chars.length, (i) => {

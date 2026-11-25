@@ -26,6 +26,8 @@ export interface Scan {
   /** The user edited the sections (reading order / grouping). */
   sectionsEdited: boolean;
   /** User-drawn section boxes: geometry, section number they produce, and how many lines they hold. */
+  /** Page of a PDF being read. */
+  doc?: { page: number; pages: number };
   areas: { id: string; cx: number; cy: number; w: number; h: number; angle: number; section: number; count: number }[];
   busy: boolean;
   error: string | null;

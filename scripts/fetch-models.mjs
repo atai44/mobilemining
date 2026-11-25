@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Downloads the PaddleOCR PP-OCRv6 (small) detection + recognition ONNX models from Hugging Face
 // into public/models/ and extracts the recognizer's character set.
-import { mkdir, stat, writeFile, readFile } from 'node:fs/promises';
+import { cp, mkdir, stat, writeFile, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
@@ -43,6 +43,11 @@ for (const m of MODELS) {
   }
 }
 
+// pdf.js support files: CJK character maps, standard fonts, image decoders (JPEG 2000 etc.)
+const pdfjsDir = join(root, 'node_modules', 'pdfjs-dist');
+for (const d of ['cmaps', 'standard_fonts', 'wasm', 'iccs']) {
+  if (await exists(join(pdfjsDir, d))) await cp(join(pdfjsDir, d), join(root, 'public', 'pdfjs', d), { recursive: true });
+}
 console.log('Models ready.');
 
 /** fetch with retries and exponential backoff (CI networks occasionally time out). */

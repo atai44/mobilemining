@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { dicts, ocrState, refreshDicts, scan, settings, showToast, view } from '../store';
 import { installDictionaries } from '../lib/db';
-import { ensureOcrEngine, openImage, openText } from '../scanActions';
+import { ensureOcrEngine, openImage, openPdfFile, openText } from '../scanActions';
 
 const BASE = new URL(import.meta.env.BASE_URL, location.href).href;
 
 function fmtMB(n: number) {
   return (n / 1e6).toFixed(1) + ' MB';
 }
+
+const isPdf = (f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+const openFile = (f: File) => (isPdf(f) ? openPdfFile(f, f.name.replace(/\.pdf$/i, '')) : openImage(f, f.name));
 
 export function CaptureView() {
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -21,7 +24,7 @@ export function CaptureView() {
     input.value = '';
     if (!file) return;
     try {
-      await openImage(file, file.name);
+      await openFile(file);
     } catch (err) {
       showToast(String((err as Error).message ?? err), 'error');
     }
@@ -36,7 +39,7 @@ export function CaptureView() {
     };
     const onDrop = (e: DragEvent) => {
       const f = e.dataTransfer?.files?.[0];
-      if (f?.type.startsWith('image/')) { e.preventDefault(); openImage(f, f.name); }
+      if (f && (f.type.startsWith('image/') || isPdf(f))) { e.preventDefault(); openFile(f); }
     };
     const onDragOver = (e: DragEvent) => e.preventDefault();
     window.addEventListener('paste', onPaste);
@@ -53,24 +56,23 @@ export function CaptureView() {
     <div class="page capture">
       <header class="page-header">
         <h1>MobileMining</h1>
-        <p class="muted">Photograph Japanese text, tap words to look them up, and send sentences to Anki.</p>
       </header>
 
       <DictionaryCard />
 
       <div class="capture-buttons">
         <button class="big-button primary" onClick={() => cameraRef.current?.click()}>
-          <span class="big-icon">📷</span>Take photo
+          <span class="big-icon">📷</span>Camera
         </button>
         <button class="big-button" onClick={() => fileRef.current?.click()}>
-          <span class="big-icon">🖼</span>Choose image
+          <span class="big-icon">🖼</span>Image / PDF
         </button>
         <button class="big-button" onClick={() => setPasting(!pasting)}>
-          <span class="big-icon">⌨</span>Paste text
+          <span class="big-icon">⌨</span>Text
         </button>
       </div>
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={onFile} data-testid="camera-input" />
-      <input ref={fileRef} type="file" accept="image/*" hidden onChange={onFile} data-testid="file-input" />
+      <input ref={fileRef} type="file" accept="image/*,application/pdf,.pdf" hidden onChange={onFile} data-testid="file-input" />
 
       {pasting && (
         <div class="card">
@@ -89,7 +91,7 @@ export function CaptureView() {
 
       {scan.value && (
         <button class="button link" onClick={() => (view.value = 'scan')}>
-          ← Back to current page
+          ← Back
         </button>
       )}
 
@@ -122,11 +124,8 @@ function DictionaryCard() {
   if (installed && !progress) return null;
   return (
     <div class="card notice">
-      <h2>Install the dictionary</h2>
-      <p>
-        MobileMining uses JMdict (≈220,000 words) and KANJIDIC2 (≈13,000 kanji), stored on your device so lookups work
-        offline. One-time download of about 10 MB.
-      </p>
+      <h2>Dictionary</h2>
+      <p class="muted small">JMdict + KANJIDIC2 · 10 MB · offline</p>
       {progress ? (
         <div>
           <div class="progress-label">
@@ -141,7 +140,7 @@ function DictionaryCard() {
         </div>
       ) : (
         <button class="button primary" onClick={install} data-testid="install-dict">
-          Install dictionary
+          Install
         </button>
       )}
       {error && <p class="error">{error}</p>}
@@ -152,20 +151,19 @@ function DictionaryCard() {
 function OcrCard() {
   const s = ocrState.value;
   const engine = settings.value.ocr.engine;
-  if (engine === 'cloud') return <p class="muted small center">OCR engine: Google Cloud Vision (Settings)</p>;
+  if (engine === 'cloud') return <p class="muted small center">OCR: Cloud Vision</p>;
   return (
     <div class="card subtle">
       <div class="row space">
         <div>
-          <strong>On-device OCR</strong>
-          <div class="muted small">PP-OCRv6 · horizontal & vertical · 15,908 kanji</div>
+          <strong>OCR</strong> <span class="muted small">on-device</span>
         </div>
         {s.state === 'idle' && (
           <button class="button small" onClick={() => ensureOcrEngine().catch(() => {})}>
-            Download (31 MB)
+            Get · 31 MB
           </button>
         )}
-        {s.state === 'ready' && <span class="badge ok">Ready</span>}
+        {s.state === 'ready' && <span class="badge ok">✓</span>}
         {s.state === 'error' && (
           <button class="button small" onClick={() => ensureOcrEngine().catch(() => {})}>
             Retry
@@ -174,7 +172,7 @@ function OcrCard() {
       </div>
       {s.state === 'loading' && (
         <div>
-          <div class="progress-label">Loading models {s.total ? `${fmtMB(s.loaded ?? 0)} / ${fmtMB(s.total)}` : '…'}</div>
+          <div class="progress-label">{s.total ? `${fmtMB(s.loaded ?? 0)} / ${fmtMB(s.total)}` : '…'}</div>
           <progress max={s.total || undefined} value={s.total ? s.loaded : undefined} />
         </div>
       )}

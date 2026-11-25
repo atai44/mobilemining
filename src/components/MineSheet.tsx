@@ -47,16 +47,16 @@ export function MineSheet({ req, onClose }: { req: MineRequest; onClose: () => v
 
   const r = req.result;
   const method = st.anki.method;
-  const actionLabel = method === 'ankiconnect' ? 'Add to Anki' : method === 'ankimobile' ? 'Send to AnkiMobile' : 'Save card';
+  const actionLabel = method === 'ankiconnect' ? 'Add' : method === 'ankimobile' ? 'AnkiMobile' : 'Save';
 
   const submit = async (force?: 'new' | 'overwrite') => {
     if (!values) return;
     setBusy(true);
     try {
       const out = await mineTerm(r, values, image, force);
-      if (out.error) showToast(`Saved locally; Anki failed: ${out.error}`, 'error');
-      else if (out.sent) showToast(`${out.sent.action === 'updated' ? 'Updated' : 'Added'} 「${r.expression}」 in ${st.anki.deck}`, 'ok');
-      else if (method === 'local') showToast(`Saved 「${r.expression}」 — export from the Mined tab`, 'ok');
+      if (out.error) showToast(`Anki: ${out.error}`, 'error');
+      else if (out.sent) showToast(`${out.sent.action === 'updated' ? 'Updated' : 'Added'} 「${r.expression}」`, 'ok');
+      else if (method === 'local') showToast(`Saved 「${r.expression}」`, 'ok');
       onClose();
     } catch (e) {
       showToast(String((e as Error).message ?? e), 'error');
@@ -125,7 +125,7 @@ export function MineSheet({ req, onClose }: { req: MineRequest; onClose: () => v
             </table>
           </details>
         )}
-        {method === 'ankimobile' && image && <p class="muted small">AnkiMobile's add-note link can't carry images; the image is kept in the Mined tab.</p>}
+        {method === 'ankimobile' && image && <p class="muted small">Image kept in Mined only</p>}
         {dupes.length > 0 && (
           <p class="small dupe-note">
             Already in Anki.{' '}
@@ -135,7 +135,7 @@ export function MineSheet({ req, onClose }: { req: MineRequest; onClose: () => v
         <div class="row sheet-actions">
           {dupes.length > 0 && method === 'ankiconnect' ? (
             <>
-              <button class="button grow" onClick={() => submit('overwrite')} disabled={busy || !values} data-testid="mine-overwrite">Overwrite existing</button>
+              <button class="button grow" onClick={() => submit('overwrite')} disabled={busy || !values} data-testid="mine-overwrite">Overwrite</button>
               <button class="button primary grow" onClick={() => submit('new')} disabled={busy || !values} data-testid="mine-submit">Add new</button>
             </>
           ) : (

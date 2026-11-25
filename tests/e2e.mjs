@@ -532,6 +532,53 @@ await page.waitForSelector('.note');
 check((await page.$$('.note')).length === 3, 'mined cards listed');
 await shot('09-mined');
 
+// 10. Picking an OCR alternative marks the character as selected
+{
+  await ocr('vertical2.png');
+  const target = await page.evaluate(() => {
+    const lines = globalThis.__mmLastOcr.lines;
+    const flat = lines.flatMap((l) => l.chars);
+    const i = flat.findIndex((c) => c.alts?.length && /\p{Script=Han}/u.test(c.c));
+    const j = i >= 0 ? i : flat.findIndex((c) => c.alts?.length);
+    return j < 0 ? null : { c: flat[j].c, nth: flat.slice(0, j).filter((x) => x.c === flat[j].c).length };
+  });
+  if (target) {
+    await tapChar(target.c, target.nth);
+    const before = await page.$eval('[data-testid=ocr-status]', (e) => e.textContent);
+    await page.click('[data-testid=popup] .ocr-alts .alt >> nth=0');
+    await page.waitForFunction(() => document.querySelector('[data-testid=ocr-status]')?.textContent.includes('selected'), null, { timeout: 10_000 }).catch(() => {});
+    const after = await page.$eval('[data-testid=ocr-status]', (e) => e.textContent).catch(() => '');
+    check(/%/.test(before) && /selected/.test(after) && !/%/.test(after), `picked alternative shows "selected" (${before} → ${after})`);
+  } else console.log('  (no OCR alternatives to test)');
+}
+
+// 11. PDFs: text layer (horizontal, vertical CID fonts, ruby) and scanned pages via OCR
+{
+  const pdfText = async (f) => {
+    await tab('Capture');
+    await page.setInputFiles('[data-testid=file-input]', join(root, 'tests/fixtures', f));
+    await page.waitForSelector('[data-testid=image-reader]');
+    await page.waitForFunction(() => !document.querySelector('[data-testid=ocr-progress]') && document.querySelector('[data-testid=image-reader] .ch'), null, { timeout: 180_000 });
+    await toText();
+    return readerText();
+  };
+  const t = Date.now();
+  const v = await pdfText('text-vertical.pdf');
+  check(v.replace(/\n/g, '') === expected.join('') && Date.now() - t < 15_000, `PDF text layer, vertical (${v.replace(/\n/g, '/')})`);
+  check((await page.$eval('[data-testid=pager]', (e) => e.innerText)).replace(/\s/g, '') === '‹1/2›', 'PDF pager');
+  await page.click('[data-testid=next-page]');
+  await page.waitForFunction(() => document.querySelector('[data-testid=pager]')?.innerText.includes('2/2'));
+  await page.waitForFunction(() => document.querySelector('[data-testid=reader] .line, [data-testid=image-reader] .ch'));
+  await toText();
+  const h = await readerText();
+  check(h.replace(/\n/g, '') === expected.join(''), `PDF page 2, horizontal (${h.replace(/\n/g, '/')})`);
+  await pdfText('text-ruby.pdf');
+  const rts = await page.$$eval('[data-testid=reader] rt', (e) => e.map((x) => x.textContent));
+  check(['きのう', 'としょかん', 'ばら'].every((r) => rts.includes(r)) && !(await page.$('[data-testid=pager]')), `PDF ruby kept as furigana (${rts.join(' ')})`);
+  const s = await pdfText('scanned.pdf');
+  check(similarity(s.replace(/\n/g, ''), expected.join('')) > 0.95, `scanned PDF read by OCR (${s.replace(/\n/g, '/')})`);
+}
+
 await browser.close();
 server.close();
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');

@@ -7,6 +7,8 @@ import { OcrSession, pointInQuad } from './lib/ocr/session';
 import { areaCorners, areaOverlap, areasIntersect, inArea, quadCentre, type Area } from './lib/areas';
 export { areaCorners, areasIntersect, inArea, type Area };
 import { lookupPrefix } from './lib/db';
+import { openPdf, renderPage } from './lib/pdf';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { checkFurigana, type FuriganaCheck } from './lib/rubyCheck';
 import { dicts } from './store';
 
@@ -180,6 +182,8 @@ function checkRuby(lines: OcrLine[]): OcrLine[] {
           if (ch && ch.c !== res.fix.c) {
             ch.alts = [{ c: ch.c, p: ch.p }, ...(ch.alts ?? []).filter((a) => a.c !== res.fix!.c)];
             ch.c = res.fix.c;
+            ch.p = Math.max(ch.p, 0.9);
+            ch.fixed = 'furigana';
           }
         }
         return res.parts.map((f) => ({ from: r.from + f.from, to: r.from + f.to, text: f.text }));
@@ -223,7 +227,46 @@ export function rebuild() {
   if (phase === 'done' && !lines.length && !s.busy) showToast('No text found. Try ⬚ Area around the text, or retake the photo closer.', 'info');
 }
 
+// --- PDFs ---------------------------------------------------------------------------------
+
+const BASE = new URL(import.meta.env.BASE_URL, location.href).href;
+let pdf: { doc: PDFDocumentProxy; name: string } | null = null;
+
+export async function openPdfFile(file: Blob, name = 'PDF') {
+  const doc = await openPdf(await file.arrayBuffer(), BASE);
+  void pdf?.doc.cleanup();
+  pdf = { doc, name };
+  await showPdfPage(1);
+}
+
+/** Shows page n of the open PDF: its own text when it has some, otherwise OCR. */
+export async function showPdfPage(n: number) {
+  if (!pdf) return;
+  const pages = pdf.doc.numPages;
+  const num = Math.min(Math.max(1, n), pages);
+  const { canvas, lines, textChars } = await renderPage(pdf.doc, num);
+  const url = await canvasUrl(canvas);
+  if (scan.value?.url) URL.revokeObjectURL(scan.value.url);
+  page.session?.cancel();
+  page = freshPage();
+  checkedOrientation.add(canvas); // PDF pages come the right way up
+  scan.value = {
+    canvas, url, lines: [], text: [], meta: [], lineOf: [], ruby: [], geom: [], pending: [], progress: null, sectionsEdited: false,
+    areas: [], busy: false, error: null, source: `${pdf.name} p.${num}`, doc: { page: num, pages },
+  };
+  view.value = 'scan';
+  if (textChars >= 4) {
+    page.extra = lines;
+    page.phase = 'done';
+    rebuild();
+  } else {
+    startAnalysis();
+  }
+}
+
 export async function openImage(blob: Blob, source = '') {
+  void pdf?.doc.cleanup();
+  pdf = null;
   const canvas = await toCanvas(blob);
   const url = await canvasUrl(canvas);
   if (scan.value?.url) URL.revokeObjectURL(scan.value.url);
@@ -339,6 +382,7 @@ export function correctChar(index: number, c: string) {
     m.alts = [{ c: m.c, p: m.p }, ...(m.alts ?? []).filter((a) => a.c !== c)];
     m.c = c;
     m.p = 1;
+    m.fixed = 'user';
     rebuild();
   } else {
     const text = [...s.text];

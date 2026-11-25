@@ -42,6 +42,9 @@ uploaded unless you turn on the optional cloud OCR engine. After the first load 
 - **Mixed text directions** on one page work: a vertical body with a horizontal heading or captions, speech bubbles,
   signs. Lines are grouped into blocks, each read in its own direction, and blocks are put in reading order. Sentences
   never run across blocks, but words split across lines or columns within a block are still found.
+- **PDFs**: open a PDF like a photo. Pages with a text layer (e-books, articles, vertical 縦書き with CID fonts) use
+  the PDF's own text and glyph positions: exact and instant, no OCR, with ruby kept as furigana. Scanned pages are
+  OCR'd. Page through with ‹ ›.
 - **Furigana in photos** is recognized as furigana. It never gets spliced between lines of text. You can show it as ruby
   over the right kanji, remove it, or keep it. It's also available on cards as `{sentence-furigana}`.
 - **Pop-up dictionary** like Yomitan:
@@ -117,10 +120,12 @@ npm run build && npm run e2e   # headless Chromium: dictionary install, OCR of h
 | `src/lib/ocr/ruby.ts` | Furigana detection and attachment (works in each line's rotated frame, so tilted photos are fine) |
 | `src/lib/ocr/session.ts` | Progressive OCR: detect once, recognize line by line with tap priority |
 | `src/lib/ocr/layout.ts` | Blocks and reading order for pages that mix horizontal and vertical text |
+| `src/lib/pdf.ts` | PDF rendering and text-layer extraction (pdf.js, loaded on demand) |
 | `scripts/` | Model download and dictionary build |
 
 ## Licenses and data
 
 - JMdict and KANJIDIC2 © the Electronic Dictionary Research and Development Group, [CC BY-SA 4.0](https://www.edrdg.org/edrdg/licence.html).
 - PaddleOCR PP-OCRv6 models: Apache-2.0.
+- pdf.js: Apache-2.0.
 - Pronunciation audio is streamed from JapanesePod101.

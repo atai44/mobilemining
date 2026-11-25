@@ -10,6 +10,8 @@ export interface OcrChar {
   alts?: { c: string; p: number }[]; // other likely characters for this position
   /** Position of the character's centre along its line, 0 (start) .. 1 (end). */
   u?: number;
+  /** Changed after OCR: picked by the user from the alternatives, or fixed using the furigana. */
+  fixed?: 'user' | 'furigana';
 }
 
 /** Furigana attached to characters [from, to) of a line. */

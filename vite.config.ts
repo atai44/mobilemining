@@ -10,7 +10,8 @@ function serviceWorker(): Plugin {
     name: 'mobilemining-sw',
     apply: 'build',
     generateBundle(_, bundle) {
-      const assets = Object.keys(bundle).filter((f) => !f.endsWith('.map') && !f.endsWith('.wasm'));
+      // pdf.js and the ONNX runtime are large and only needed on use: cached when first fetched.
+      const assets = Object.keys(bundle).filter((f) => !f.endsWith('.map') && !f.endsWith('.wasm') && !/(^|\/)pdf/.test(f));
       const wasm = Object.keys(bundle).filter((f) => f.endsWith('.wasm')).map((f) => '/' + f);
       const version = Date.now().toString(36);
       const shell = ['./', ...assets.map((a) => './' + a), './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'];
@@ -41,7 +42,7 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   // Dictionary files are imported into IndexedDB once; don't keep a second copy.
   if (url.pathname.includes('/dict/')) return;
-  const big = /\\/models\\//.test(url.pathname) || url.pathname.endsWith('.wasm');
+  const big = /\\/(models|pdfjs)\\//.test(url.pathname) || /\\/assets\\/pdf/.test(url.pathname) || url.pathname.endsWith('.wasm');
   if (big) {
     e.respondWith(caches.open(RUNTIME).then(async (c) => {
       const hit = await c.match(e.request);

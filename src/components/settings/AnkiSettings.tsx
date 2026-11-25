@@ -28,7 +28,7 @@ export function AnkiSettings() {
       const [d, m] = await Promise.all([c.deckNames(), c.modelNames()]);
       setDecks(d);
       setModels(m);
-      setConn({ state: 'ok', message: `Connected to Anki (AnkiConnect v${v})` });
+      setConn({ state: 'ok', message: `Connected · v${v}` });
       const cur = settings.value.anki;
       if (cur.model && m.includes(cur.model) && !Object.keys(cur.fields).length) await loadFields(cur.model);
     } catch (e) {
@@ -87,12 +87,12 @@ export function AnkiSettings() {
       <h2>Anki</h2>
       <YomitanImport />
       <div class="field">
-        <span>Send cards with</span>
+        <span>Send via</span>
         <div class="segmented">
           {([
             ['ankiconnect', 'AnkiConnect'],
-            ['ankimobile', 'AnkiMobile (iOS)'],
-            ['local', 'Save & export'],
+            ['ankimobile', 'AnkiMobile'],
+            ['local', 'Export'],
           ] as [AnkiMethod, string][]).map(([m, label]) => (
             <button key={m} class={a.method === m ? 'active' : ''} onClick={() => updateSettings((s) => (s.anki.method = m))}>{label}</button>
           ))}
@@ -103,18 +103,18 @@ export function AnkiSettings() {
         <>
           <div class={`conn conn-${conn.state}`} data-testid="anki-status">
             <span class="dot" />
-            <span>{conn.state === 'checking' ? 'Connecting…' : conn.state === 'idle' ? 'Not checked' : conn.message}</span>
+            <span>{conn.state === 'checking' ? 'Connecting…' : conn.state === 'idle' ? '—' : conn.message}</span>
             <button class="button small" onClick={() => connect(true)} disabled={conn.state === 'checking'} data-testid="anki-connect">
               {conn.state === 'ok' ? 'Refresh' : 'Connect'}
             </button>
           </div>
           {conn.state === 'error' && (
             <details class="small help" open>
-              <summary>How to connect</summary>
+              <summary>Help</summary>
               <ol>
-                <li>Desktop: install the AnkiConnect add-on (code <code>2055492159</code>) and keep Anki open. Android: install AnkiDroid and the “AnkiConnect Android” app.</li>
-                <li>In AnkiConnect's config, add <code>{location.origin}</code> to <code>webCorsOriginList</code>, or press Connect and approve the prompt in Anki.</li>
-                <li>A phone can't reach desktop Anki over Wi-Fi from this site (browsers block it); use AnkiConnect Android, AnkiMobile, or save &amp; export.</li>
+                <li>Desktop: AnkiConnect add-on <code>2055492159</code>, Anki open. Android: AnkiConnect Android.</li>
+                <li>Add <code>{location.origin}</code> to <code>webCorsOriginList</code>, or Connect and approve in Anki.</li>
+                <li>Phone → desktop Anki is blocked by browsers.</li>
               </ol>
             </details>
           )}
@@ -132,8 +132,7 @@ export function AnkiSettings() {
 
           {conn.state === 'ok' && (
             <div class="setup-box">
-              <p class="small">New to mining? Create a ready-made <b>{MM_MODEL}</b> note type (sentence on front; word, audio, pitch, meaning and photo on back) and a deck in one step.</p>
-              <button class="button" onClick={setupForMe} disabled={busy} data-testid="anki-setup">{busy ? 'Setting up…' : 'Set up note type & deck for me'}</button>
+              <button class="button" onClick={setupForMe} disabled={busy} title="Sentence card: word, audio, pitch, meaning, photo" data-testid="anki-setup">{busy ? '…' : `Create “${MM_MODEL}” note type`}</button>
             </div>
           )}
 
@@ -146,7 +145,7 @@ export function AnkiSettings() {
                   {[...new Set([a.deck, ...decks])].filter(Boolean).map((d) => <option key={d}>{d}</option>)}
                 </select>
               ) : (
-                <input class="grow" value={a.deck} placeholder="Connect to list decks" onChange={(e) => updateSettings((s) => (s.anki.deck = (e.target as HTMLInputElement).value))} />
+                <input class="grow" value={a.deck} placeholder="Deck" onChange={(e) => updateSettings((s) => (s.anki.deck = (e.target as HTMLInputElement).value))} />
               )}
               {conn.state === 'ok' && <button class="button small" onClick={newDeck}>New…</button>}
             </div>
@@ -159,44 +158,44 @@ export function AnkiSettings() {
                 {[...new Set([a.model, ...models])].filter(Boolean).map((m) => <option key={m}>{m}</option>)}
               </select>
             ) : (
-              <input value={a.model} placeholder="Connect to list note types" onChange={(e) => updateSettings((s) => (s.anki.model = (e.target as HTMLInputElement).value))} />
+              <input value={a.model} placeholder="Note type" onChange={(e) => updateSettings((s) => (s.anki.model = (e.target as HTMLInputElement).value))} />
             )}
           </label>
           <FieldMapping fields={a.fields} extraMarkers={dynamicMarkers} onChange={(f, v) => updateSettings((s) => (s.anki.fields[f] = v))} />
 
           <div class="field">
             <span>Duplicates</span>
-            <Toggle label="Check for duplicates (first field)" checked={a.checkForDuplicates} onChange={(v) => updateSettings((s) => (s.anki.checkForDuplicates = v))} />
+            <Toggle label="Check" checked={a.checkForDuplicates} onChange={(v) => updateSettings((s) => (s.anki.checkForDuplicates = v))} />
             {a.checkForDuplicates && (
               <div class="row wrap">
                 <select value={a.duplicateBehavior} onChange={(e) => updateSettings((s) => (s.anki.duplicateBehavior = (e.target as HTMLSelectElement).value as DuplicateBehavior))} data-testid="dupe-behavior">
-                  <option value="new">Add a new note anyway</option>
+                  <option value="new">Add anyway</option>
                   <option value="prevent">Don't add</option>
-                  <option value="overwrite">Overwrite the existing note</option>
+                  <option value="overwrite">Overwrite</option>
                 </select>
                 <select value={a.duplicateScope} onChange={(e) => updateSettings((s) => (s.anki.duplicateScope = (e.target as HTMLSelectElement).value as typeof a.duplicateScope))}>
-                  <option value="collection">in whole collection</option>
-                  <option value="deck">in this deck</option>
-                  <option value="deck-root">in this deck's root deck</option>
+                  <option value="collection">Collection</option>
+                  <option value="deck">Deck</option>
+                  <option value="deck-root">Root deck</option>
                 </select>
               </div>
             )}
           </div>
-          <Toggle label="One-tap add from the popup (✎ edits first)" checked={a.quickAdd} onChange={(v) => updateSettings((s) => (s.anki.quickAdd = v))} />
+          <Toggle label="One-tap add" checked={a.quickAdd} onChange={(v) => updateSettings((s) => (s.anki.quickAdd = v))} />
           <label class="field">
-            <span>“View note” opens</span>
+            <span>View note in</span>
             <select value={a.noteGuiMode} onChange={(e) => updateSettings((s) => (s.anki.noteGuiMode = (e.target as HTMLSelectElement).value as 'browse' | 'edit'))}>
-              <option value="browse">Card browser</option>
-              <option value="edit">Note editor</option>
+              <option value="browse">Browser</option>
+              <option value="edit">Editor</option>
             </select>
           </label>
-          <Toggle label="Add pronunciation audio to {audio} fields" checked={a.audio} onChange={(v) => updateSettings((s) => (s.anki.audio = v))} />
+          <Toggle label="Audio" checked={a.audio} onChange={(v) => updateSettings((s) => (s.anki.audio = v))} />
         </>
       )}
 
       {a.method === 'ankimobile' && (
         <>
-          <p class="muted small">Opens AnkiMobile's “Add” screen with the card filled in. Field names must match your note type exactly. Images and audio aren't supported by AnkiMobile's link API.</p>
+          <p class="muted small">No images or audio</p>
           <label class="field">
             <span>Profile</span>
             <input value={a.mobile.profile} onInput={(e) => updateSettings((s) => (s.anki.mobile.profile = (e.target as HTMLInputElement).value))} />
@@ -222,18 +221,17 @@ export function AnkiSettings() {
         </>
       )}
 
-      {a.method === 'local' && <p class="muted small">Cards are saved on this device. Export them as a TSV file from the Mined tab and import into Anki (File → Import).</p>}
 
       <label class="field">
         <span>Tags</span>
         <input value={a.tags} onInput={(e) => updateSettings((s) => (s.anki.tags = (e.target as HTMLInputElement).value))} />
       </label>
       <label class="field">
-        <span>Default card image</span>
+        <span>Image</span>
         <select value={a.image} onChange={(e) => updateSettings((s) => (s.anki.image = (e.target as HTMLSelectElement).value as ImageMode))}>
-          <option value="page">Whole photo</option>
-          <option value="line">Just the line</option>
-          <option value="none">No image</option>
+          <option value="page">Page</option>
+          <option value="line">Line</option>
+          <option value="none">None</option>
         </select>
       </label>
     </section>
@@ -269,8 +267,7 @@ function YomitanImport() {
 
   return (
     <div class="yomitan-import">
-      <button class="button small" onClick={() => ref.current?.click()} data-testid="import-yomitan">Import from Yomitan…</button>
-      <span class="muted small"> Yomitan → Settings → Backup → Export Settings</span>
+      <button class="button small" onClick={() => ref.current?.click()} title="Yomitan → Settings → Backup → Export Settings" data-testid="import-yomitan">Import Yomitan settings…</button>
       <input ref={ref} type="file" accept=".json,application/json" hidden data-testid="yomitan-file" onChange={(e) => {
         const input = e.currentTarget as HTMLInputElement;
         const f = input.files?.[0];
@@ -282,7 +279,7 @@ function YomitanImport() {
           <select value={profile} onChange={(e) => setProfile(Number((e.target as HTMLSelectElement).value))}>
             {file.profiles.map((p, i) => <option key={i} value={i}>{p.name ?? `Profile ${i + 1}`}</option>)}
           </select>
-          <button class="button small primary" onClick={() => apply(file, profile)}>Import profile</button>
+          <button class="button small primary" onClick={() => apply(file, profile)}>Import</button>
         </div>
       )}
       {summary && (
@@ -308,7 +305,6 @@ function FieldMapping({ fields, onChange, editableNames, onRename, onAdd, extraM
   return (
     <div class="field">
       <span>Fields</span>
-      {!entries.length && !editableNames && <p class="muted small">Choose a note type to map its fields.</p>}
       <datalist id="markers">
         {all.map((m) => <option key={m.name} value={`{${m.name}}`}>{m.description}</option>)}
         <option value="{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}">Sentence with the word in bold</option>
@@ -325,7 +321,7 @@ function FieldMapping({ fields, onChange, editableNames, onRename, onAdd, extraM
       ))}
       {editableNames && <button class="button small" onClick={onAdd}>+ Field</button>}
       <details class="small">
-        <summary>Available markers (same names as Yomitan)</summary>
+        <summary>Markers</summary>
         <ul class="marker-list">
           {all.map((m) => <li key={m.name}><code>{`{${m.name}}`}</code> — {m.description}</li>)}
         </ul>

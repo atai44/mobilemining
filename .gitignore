@@ -7,3 +7,4 @@ public/dict/
 test-results/
 *.log
 tests/photos/
+public/pdfjs/
