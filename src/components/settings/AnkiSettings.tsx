@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { settings, showToast, updateSettings } from '../../store';
 import { client, createMobileMiningModel, isAndroid, isIOS, dictSlug, guessMarker, MARKERS, MM_FIELDS, MM_MODEL } from '../../lib/anki';
 import type { AnkiMethod, DuplicateBehavior, ImageMode, Settings } from '../../lib/settings';
+import type { AnkiNotetype } from '../../lib/apkg';
 import { applyYomitanProfile, parseYomitanSettings, type ImportSummary, type YomitanSettingsFile } from '../../lib/yomitan/settingsImport';
 import { installedDictionaries, refreshDictionaries } from '../../dictionaries';
 import { Toggle } from '../ui';
@@ -217,12 +218,7 @@ export function AnkiSettings() {
         </>
       )}
 
-      {a.method === 'local' && (
-        <>
-          <p class="muted small">Mined → TSV ↓ → Anki: File → Import (AnkiDroid: Import). No images or audio.</p>
-          <NoteTypeEditor pick={(s) => s.anki.export} markers={dynamicMarkers} testid="export" optional />
-        </>
-      )}
+      {a.method === 'local' && <ExportSettings markers={dynamicMarkers} />}
 
       <label class="field">
         <span>Tags</span>
@@ -237,6 +233,80 @@ export function AnkiSettings() {
         </select>
       </label>
     </section>
+  );
+}
+
+/** Export: an Anki package with the user's own note type (or a TSV file). */
+function ExportSettings({ markers }: { markers: { name: string; description: string }[] }) {
+  const ex = settings.value.anki.export;
+  const ref = useRef<HTMLInputElement>(null);
+  const [choices, setChoices] = useState<{ notetype: AnkiNotetype; notes: number }[] | null>(null);
+  const use = (nt: AnkiNotetype) => {
+    updateSettings((s) => {
+      const prev = s.anki.export.fields;
+      s.anki.export.notetype = nt;
+      s.anki.export.model = nt.name;
+      s.anki.export.fields = Object.fromEntries([...nt.fields].sort((x, y) => x.ord - y.ord).map((f) => [f.name, prev[f.name] ?? guessMarker(f.name)]));
+    });
+    setChoices(null);
+    showToast(nt.name, 'ok');
+  };
+  const load = async (f: File) => {
+    try {
+      const { readNotetypes } = await import('../../lib/apkg');
+      const all = await readNotetypes(await f.arrayBuffer());
+      const used = all.filter((x) => x.notes > 0);
+      const list = used.length ? used : all;
+      const preferred = list.find((x) => x.notetype.name === ex.model);
+      if (preferred || list.length === 1) use((preferred ?? list[0]).notetype);
+      else setChoices(list);
+    } catch (e) {
+      showToast(String((e as Error).message ?? e), 'error');
+    }
+  };
+  return (
+    <>
+      <div class="segmented" data-testid="export-format">
+        {([['apkg', 'Anki package'], ['tsv', 'TSV']] as const).map(([f, label]) => (
+          <button key={f} class={ex.format === f ? 'active' : ''} onClick={() => updateSettings((s) => (s.anki.export.format = f))}>{label}</button>
+        ))}
+      </div>
+      {ex.format === 'apkg' ? (
+        <>
+          <p class="muted small">Mined → Send → open with AnkiDroid / Anki. Images included; no audio.</p>
+          <div class="field">
+            <span>Note type</span>
+            <div class="row">
+              <b class="grow" data-testid="export-notetype">{ex.notetype ? ex.notetype.name : `${MM_MODEL} (built-in)`}</b>
+              <button class="button small" onClick={() => ref.current?.click()} title="Export a deck with one card of your note type from Anki (Anki package), then load it here" data-testid="load-notetype">Load from Anki…</button>
+            </div>
+            {!ex.notetype && ex.model && ex.model !== MM_MODEL && <small class="error">Export a “{ex.model}” card from Anki (.apkg) and load it here.</small>}
+            <input ref={ref} type="file" accept=".apkg,.colpkg,application/octet-stream,application/zip" hidden data-testid="notetype-file" onChange={(e) => {
+              const input = e.currentTarget as HTMLInputElement;
+              const f = input.files?.[0];
+              input.value = '';
+              if (f) load(f);
+            }} />
+            {choices && (
+              <select onChange={(e) => { const c = choices[Number((e.target as HTMLSelectElement).value)]; if (c) use(c.notetype); }} data-testid="notetype-choice">
+                <option value="">—</option>
+                {choices.map((c, i) => <option key={c.notetype.id} value={i}>{c.notetype.name}{c.notes ? ` (${c.notes})` : ''}</option>)}
+              </select>
+            )}
+          </div>
+          <label class="field">
+            <span>Deck</span>
+            <input value={ex.deck} placeholder="Mining" onInput={(e) => updateSettings((s) => (s.anki.export.deck = (e.target as HTMLInputElement).value))} data-testid="export-deck" />
+          </label>
+          {ex.notetype && <FieldMapping fields={ex.fields} extraMarkers={markers} onChange={(f, v) => updateSettings((s) => (s.anki.export.fields[f] = v))} />}
+        </>
+      ) : (
+        <>
+          <p class="muted small">Mined → TSV ↓ → Anki: File → Import. No images or audio.</p>
+          <NoteTypeEditor pick={(s) => s.anki.export} markers={markers} testid="export" optional />
+        </>
+      )}
+    </>
   );
 }
 

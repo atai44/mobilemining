@@ -16,13 +16,16 @@
   "dependencies": {
     "@preact/signals": "^2.11.4",
     "fflate": "^0.8.3",
+    "fzstd": "^0.1.1",
     "onnxruntime-web": "^1.31.1",
     "pdfjs-dist": "^6.5.438",
-    "preact": "^11.2.0"
+    "preact": "^11.2.0",
+    "sql.js": "^1.17.0"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.6",
     "@types/node": "^26.6.6",
+    "@types/sql.js": "^1.16.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "vitest": "^5.1.1",

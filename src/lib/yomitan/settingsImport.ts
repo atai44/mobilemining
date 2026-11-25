@@ -51,7 +51,7 @@ export function applyYomitanProfile(s: Settings, profile: YomitanProfile, instal
       const deck = term.deck ?? '', model = term.model ?? '';
       Object.assign(s.anki, { deck, model, fields: { ...fields } });
       Object.assign(s.anki.mobile, { deck, model, fields: { ...fields } });
-      s.anki.export = { deck, model, fields: { ...fields } };
+      s.anki.export = { ...s.anki.export, deck, model, fields: { ...fields }, notetype: s.anki.export.notetype?.name === model ? s.anki.export.notetype : null };
       notes.push(`Anki: deck “${deck}”, note type “${model}”, ${Object.keys(fields).length} fields`);
       const unknown = new Set<string>();
       for (const t of Object.values(fields)) for (const m of t.matchAll(/\{([a-z0-9][a-z0-9._\-[\]]*)\}/gi)) {

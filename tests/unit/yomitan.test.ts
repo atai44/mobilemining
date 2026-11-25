@@ -159,7 +159,7 @@ describe('Yomitan settings import', () => {
     const fields = { Expression: '{expression}', Sentence: '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}', Weird: '{some-custom}' };
     expect(s.anki.fields).toEqual(fields);
     expect(s.anki.mobile).toMatchObject({ deck: 'Mining', model: 'Lapis', fields, profile: 'User 1' });
-    expect(s.anki.export).toEqual({ deck: 'Mining', model: 'Lapis', fields });
+    expect(s.anki.export).toMatchObject({ deck: 'Mining', model: 'Lapis', fields, notetype: null });
     expect(s.dictionaries.map((d) => [d.name, d.enabled])).toEqual([['Jitendex', true], ['JPDB', false], ['JMdict (built-in)', true], ['KANJIDIC2 (built-in)', true]]);
     expect(sum.warnings.join(' ')).toContain('{some-custom}');
     expect(sum.warnings.join(' ')).toContain('Missing Dict');
@@ -170,7 +170,7 @@ describe('Yomitan settings import', () => {
     const note = { created: 1, status: 'pending' as const, fields: { expression: '読む', reading: 'よむ', 'cloze-prefix': '本を', 'cloze-body': '読んだ', 'cloze-suffix': '。', glossary: '<div class="g">to read</div>' } };
     // No export note type: the fixed columns
     expect(notesToTsv([note], s).split('\n')[2]).toMatch(/^#columns:expression\treading/);
-    s.anki.export = { deck: 'Mining', model: 'Lapis', fields: { Expression: '{expression}', Sentence: '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}', Meaning: '{glossary}', Picture: '{image}' } };
+    s.anki.export = { format: 'tsv', notetype: null, deck: 'Mining', model: 'Lapis', fields: { Expression: '{expression}', Sentence: '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}', Meaning: '{glossary}', Picture: '{image}' } };
     const lines = notesToTsv([note], s).trim().split('\n');
     expect(lines.slice(0, 6)).toEqual(['#separator:tab', '#html:true', '#notetype:Lapis', '#deck:Mining', '#columns:Expression\tSentence\tMeaning\tPicture\ttags', '#tags column:5']);
     expect(lines[6].split('\t')).toEqual(['読む', '本を<b>読んだ</b>。', '"<div class=""g"">to read</div>"', '', 'mm']);

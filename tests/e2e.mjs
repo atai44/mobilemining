@@ -673,6 +673,36 @@ await shot('09-mined');
     `AnkiDroid share: front/back as text (${JSON.stringify(shared)?.slice(0, 120)}); AnkiMobile flagged on Android: ${warned}`);
 }
 
+// 13. Anki package: the user's own note type (loaded from an Anki export), cards + image inside
+{
+  await tab('Settings');
+  await page.click('.segmented >> text=Export');
+  await page.click('[data-testid=export-format] >> text=Anki package');
+  await page.setInputFiles('[data-testid=notetype-file]', join(root, 'tests/fixtures/anki-lapis-modern.apkg'));
+  await page.waitForFunction(() => document.querySelector('[data-testid=export-notetype]')?.textContent === 'Lapis', null, { timeout: 20_000 });
+  await page.fill('[data-testid=export-deck]', 'Mining::Phone');
+  await ocr('horizontal.png');
+  await tapChar('読');
+  await page.click('[data-testid=popup] [data-testid=mine-button] >> nth=0');
+  await page.waitForSelector('.toast-ok');
+  await tab('Mined');
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=send-apkg]')]);
+  const zipBytes = new Uint8Array(await readFile(await dl.path()));
+  if (process.env.MM_APKG_OUT) await dl.saveAs(join(process.env.MM_APKG_OUT, 'browser.apkg'));
+  const { unzipSync, strFromU8 } = require(join(root, 'node_modules/fflate'));
+  const files = unzipSync(zipBytes);
+  const SQL = await require(join(root, 'node_modules/sql.js'))();
+  const db = new SQL.Database(files['collection.anki2']);
+  const notes = db.exec("SELECT CAST(mid AS TEXT), flds FROM notes")[0].values;
+  const decks = db.exec('SELECT decks FROM col')[0].values[0][0];
+  const last = notes.at(-1)[1].split('\x1f');
+  const media = Object.values(JSON.parse(strFromU8(files.media)));
+  check(notes.every((n) => n[0] === '1795597140674') && last[0] === '読む' && last.some((f) => f.includes('<b>読まなかった</b>')) && decks.includes('"Mining::Phone"') && media.some((m) => /\.jpg$/.test(m)),
+    `Anki package with the Lapis note type: ${notes.length} notes, media ${media.join(', ')}, fields ${last.slice(0, 2).join(' | ')}`);
+  check(!(await page.$('[data-testid=send-apkg]:not([disabled])')), 'sent cards are marked as in Anki');
+  db.close();
+}
+
 await browser.close();
 server.close();
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');

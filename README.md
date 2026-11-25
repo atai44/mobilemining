@@ -67,7 +67,14 @@ uploaded unless you turn on the optional cloud OCR engine. After the first load 
     AnkiConnect server and key, deck, note type, field markers, tags, duplicate options, and dictionary order. Custom
     Handlebars templates are not supported; standard markers are.
   - **AnkiMobile (iOS)**: fills AnkiMobile's Add screen through its `anki://x-callback-url/addnote` link.
-  - **Save & export**: every mined card is kept on the device and can be exported as TSV (Anki: File → Import).
+  - **AnkiDroid (share)**: Android's share sheet opens AnkiDroid's note editor with two fields filled (text only).
+  - **Export → Anki package**: the best option on Android without AnkiConnect. Cards are kept on the device; *Mined →
+    Send* builds one `.apkg` (in the browser, with sql.js) to open with AnkiDroid or Anki. It uses your own note type:
+    export a deck with one card of it from Anki as an Anki package and load it under *Load from Anki…* (the note type's
+    id is kept, so imports land in your existing note type, not a copy). All fields, the photo and dictionary images
+    are included; audio isn't (the audio site doesn't allow pages to download it). Re-importing a package doesn't
+    duplicate notes. Without a loaded note type the built-in `MobileMining` type is used.
+  - **Export → TSV**: text only, for Anki's File → Import.
 
 ## Running it
 
@@ -100,6 +107,8 @@ send or export them later.
 
 ```bash
 npm test                       # unit tests: deinflection, furigana, lookup ranking, sentence extraction
+# Anki packages against Anki's own importer (pip install anki):
+MM_APKG_OUT=/tmp/apkg npx vitest run tests/unit/apkg.test.ts && python tests/anki-import-check.py /tmp/apkg
 MM_PHOTOS=dir npm run e2e      # optionally also checks real photos (1.jpg–3.jpg, not in the repo)
 npm run build && npm run e2e   # headless Chromium: dictionary install, OCR of horizontal/vertical/rotated pages and
                                # pages with furigana, Yomitan dictionary + settings import, lookup, and mining
@@ -115,7 +124,8 @@ npm run build && npm run e2e   # headless Chromium: dictionary install, OCR of h
 | `src/lib/deinflect.ts` | Japanese deinflection rules |
 | `src/lib/lookup.ts` | Yomitan-style scanning and ranking; sentence extraction |
 | `src/lib/db.ts` | IndexedDB: dictionary install, lookups, mined cards |
-| `src/lib/anki.ts` | AnkiConnect / AnkiMobile / TSV, Yomitan-compatible field markers, duplicates |
+| `src/lib/anki.ts` | AnkiConnect / AnkiMobile / AnkiDroid share / TSV, Yomitan-compatible field markers, duplicates |
+| `src/lib/apkg.ts` | Anki packages: read note types from Anki exports, write `.apkg` with the user's note type |
 | `src/lib/yomitan/` | Yomitan dictionary import, structured-content rendering, settings import |
 | `src/lib/ocr/ruby.ts` | Furigana detection and attachment (works in each line's rotated frame, so tilted photos are fine) |
 | `src/lib/ocr/session.ts` | Progressive OCR: detect once, recognize line by line with tap priority |

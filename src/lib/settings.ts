@@ -1,3 +1,4 @@
+import type { AnkiNotetype } from './apkg';
 import type { Orientation } from './ocr/types';
 
 export type AnkiMethod = 'ankiconnect' | 'ankimobile' | 'ankidroid' | 'local';
@@ -55,8 +56,12 @@ export interface Settings {
     mobile: { profile: string; deck: string; model: string; fields: Record<string, string> };
     /** AnkiDroid via Android's share sheet: only the first two fields of its note editor. */
     droid: { fields: Record<string, string> };
-    /** Note type for the TSV export (empty fields: a fixed set of columns). */
-    export: { deck: string; model: string; fields: Record<string, string> };
+    /**
+     * Cards for import into Anki: an Anki package (.apkg) built with the user's note type, read
+     * from a package they exported from Anki (built-in MobileMining type until then), or a TSV
+     * file (empty fields: a fixed set of columns).
+     */
+    export: { format: 'apkg' | 'tsv'; deck: string; model: string; fields: Record<string, string>; notetype: AnkiNotetype | null };
   };
 }
 
@@ -89,7 +94,7 @@ export const DEFAULT_SETTINGS: Settings = {
       fields: { Front: '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}', Back: '{furigana}<br>{glossary}' },
     },
     droid: { fields: { Front: '{sentence}', Back: '{expression}【{reading}】\n{glossary-plain-no-dictionary}' } },
-    export: { deck: '', model: '', fields: {} },
+    export: { format: 'apkg', deck: '', model: '', fields: {}, notetype: null },
   },
 };
 

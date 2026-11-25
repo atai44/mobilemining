@@ -238,7 +238,7 @@ export function buildMarkerValues(r: TermResult, ctx: MarkerContext): Record<str
 }
 
 /** Media markers are filled in when the note is sent; everything else comes from `values`. */
-const MEDIA_MARKERS = new Set(['image', 'screenshot', 'clipboard-image', 'audio']);
+export const MEDIA_MARKERS = new Set(['image', 'screenshot', 'clipboard-image', 'audio']);
 
 export function fillTemplate(template: string, values: Record<string, string>): string {
   return template.replace(/\{([a-z0-9][a-z0-9._\-[\]]*)\}/gi, (_m, name: string) => values[name] ?? '');
@@ -373,7 +373,7 @@ async function uploadGlossaryImages(c: AnkiConnect, html: string): Promise<strin
   return html;
 }
 
-function hash(s: string): string {
+export function hash(s: string): string {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
   return (h >>> 0).toString(36);
@@ -452,7 +452,7 @@ export const MM_FIELDS: Record<string, string> = {
   Source: '{document-title}',
 };
 
-const MM_CSS = `.card { font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif; font-size: 22px; text-align: center; color: #1c1b19; background: #fbfaf7; line-height: 1.6; }
+export const MM_CSS = `.card { font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif; font-size: 22px; text-align: center; color: #1c1b19; background: #fbfaf7; line-height: 1.6; }
 .nightMode.card, .night_mode .card { color: #ede9e1; background: #1d1c1a; }
 .sentence { font-size: 30px; margin: 12px 0; }
 .sentence b { color: #c2410c; }
@@ -463,6 +463,9 @@ const MM_CSS = `.card { font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic
 .meaning ol, .meaning ul { padding-left: 1.4em; }
 .picture img { max-width: 100%; max-height: 360px; margin-top: 16px; border-radius: 8px; }
 .source { color: #8a867d; font-size: 14px; margin-top: 12px; }`;
+
+export const MM_FRONT = '<div class="sentence">{{Sentence}}</div>';
+export const MM_BACK = '{{FrontSide}}<hr id="answer"><div class="word">{{furigana:Furigana}}</div>{{Audio}}<div class="pitch">{{PitchAccent}}</div><div class="meaning">{{Meaning}}</div><div class="picture">{{Picture}}</div><div class="source">{{Source}}</div>';
 
 export async function createMobileMiningModel(settings: Settings): Promise<string> {
   const c = client(settings);
@@ -475,8 +478,8 @@ export async function createMobileMiningModel(settings: Settings): Promise<strin
       isCloze: false,
       cardTemplates: [{
         Name: 'Sentence → Word',
-        Front: '<div class="sentence">{{Sentence}}</div>',
-        Back: '{{FrontSide}}<hr id="answer"><div class="word">{{furigana:Furigana}}</div>{{Audio}}<div class="pitch">{{PitchAccent}}</div><div class="meaning">{{Meaning}}</div><div class="picture">{{Picture}}</div><div class="source">{{Source}}</div>',
+        Front: MM_FRONT,
+        Back: MM_BACK,
       }],
     });
   }

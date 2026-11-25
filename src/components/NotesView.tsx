@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { deleteNote, listNotes, saveNote, type MinedNote } from '../lib/db';
-import { notesToTsv, sendToAnkiConnect, viewNote } from '../lib/anki';
+import { MM_FIELDS, notesToTsv, sendToAnkiConnect, viewNote } from '../lib/anki';
 import { settings, showToast } from '../store';
 
 export function NotesView() {
@@ -34,6 +34,32 @@ export function NotesView() {
     showToast(failed ? `${failed} card(s) failed` : `Sent ${pending.length} card(s)`, failed ? 'error' : 'ok');
   };
 
+  const packaging = st.anki.method === 'local' && st.anki.export.format === 'apkg';
+
+  /** All cards not yet sent, as one Anki package: shared (e.g. to AnkiDroid) or downloaded. */
+  const sendPackage = async () => {
+    setBusy(true);
+    try {
+      const pending = (notes ?? []).filter((n) => n.status !== 'added');
+      const ex = st.anki.export;
+      const { buildApkg, builtinNotetype } = await import('../lib/apkg');
+      const res = await buildApkg(pending, { notetype: ex.notetype ?? builtinNotetype(), fields: ex.notetype ? ex.fields : MM_FIELDS, deck: ex.deck || 'Mining', tags: st.anki.tags });
+      const file = new File([res.blob], `mobilemining-${new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-')}.apkg`, { type: 'application/octet-stream' });
+      let shared = false;
+      if (navigator.canShare?.({ files: [file] })) {
+        try { await navigator.share({ files: [file] }); shared = true; } catch (e) { if ((e as Error).name === 'AbortError') return; }
+      }
+      if (!shared) download(file);
+      for (const n of pending) { n.status = 'added'; n.error = undefined; await saveNote(n); }
+      showToast(`${res.notes} → ${file.name}`, 'ok');
+    } catch (e) {
+      showToast(String((e as Error).message ?? e), 'error');
+    } finally {
+      setBusy(false);
+      reload();
+    }
+  };
+
   const exportTsv = () => {
     const blob = new Blob([notesToTsv(notes ?? [], st)], { type: 'text/tab-separated-values' });
     const a = document.createElement('a');
@@ -53,6 +79,7 @@ export function NotesView() {
       </header>
       <div class="row wrap">
         {canSend && <button class="button primary" disabled={busy || !pendingCount} onClick={sendPending}>{busy ? 'Sending…' : `Send ${pendingCount}`}</button>}
+        {packaging && <button class="button primary" disabled={busy || !pendingCount} onClick={sendPackage} title="Anki package (.apkg)" data-testid="send-apkg">{busy ? '…' : `Send ${pendingCount}`}</button>}
         <button class="button" disabled={!notes.length} onClick={exportTsv} title="Anki: File → Import">TSV ↓</button>
       </div>
       {!notes.length && <p class="muted center">Empty</p>}
@@ -92,4 +119,12 @@ function NoteItem({ n, canSend, onSend, onDelete, onView }: { n: MinedNote; canS
       </div>
     </li>
   );
+}
+
+function download(file: File) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file);
+  a.download = file.name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
