@@ -41,11 +41,23 @@ export function SettingsView() {
           <span>Resolution: {st.ocr.detMaxSide}px</span>
           <input type="range" min={960} max={2560} step={64} value={st.ocr.detMaxSide} onInput={(e) => updateSettings((s) => (s.ocr.detMaxSide = Number((e.target as HTMLInputElement).value)))} />
         </label>
-        {ocrState.value.message && <p class="error small">{ocrState.value.message}</p>}
+        {ocrState.value.state === 'error' && <p class="error small">{ocrState.value.message}</p>}
       </section>
 
       <section class="card">
         <h2>Reading</h2>
+        <div class="field">
+          <span>Theme</span>
+          <div class="segmented" data-testid="theme">
+            {(['auto', 'light', 'dark'] as const).map((t) => (
+              <button key={t} class={st.display.theme === t ? 'active' : ''} onClick={() => updateSettings((s) => (s.display.theme = t))}>{t === 'auto' ? 'Auto' : t === 'light' ? 'Light' : 'Dark'}</button>
+            ))}
+          </div>
+        </div>
+        <label class="field row space">
+          <span>Highlight colour</span>
+          <input type="color" class="color" value={st.display.highlight} onInput={(e) => updateSettings((s) => (s.display.highlight = (e.target as HTMLInputElement).value))} data-testid="highlight-color" />
+        </label>
         <label class="field">
           <span>Text size: {st.display.fontSize}px</span>
           <input type="range" min={14} max={40} value={st.display.fontSize} onInput={(e) => updateSettings((s) => (s.display.fontSize = Number((e.target as HTMLInputElement).value)))} />

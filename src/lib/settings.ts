@@ -1,5 +1,6 @@
 import type { AnkiNotetype } from './apkg';
 import { isNative } from './native';
+import { looksMisguessed, recommendedFields } from './noteTypes';
 import type { Orientation } from './ocr/types';
 
 export type AnkiMethod = 'ankiconnect' | 'ankimobile' | 'ankidroid' | 'local';
@@ -33,6 +34,10 @@ export interface Settings {
     hardLineBreaks: boolean;
     /** What to do with furigana detected in photos: show as ruby, drop, or keep as separate lines. */
     furigana: FuriganaMode;
+    /** Light / dark: follow the device, or fixed. */
+    theme: 'auto' | 'light' | 'dark';
+    /** Colour of the looked-up word (#rrggbb). */
+    highlight: string;
   };
   /** Dictionaries in priority order (built-in and imported). */
   dictionaries: DictionarySetting[];
@@ -43,6 +48,8 @@ export interface Settings {
     deck: string;
     model: string;
     fields: Record<string, string>;
+    /** Field mappings by note type, so switching note types and back keeps each one's mapping. */
+    savedFields: Record<string, Record<string, string>>;
     tags: string;
     /** Yomitan semantics: prevent adding, add a new note anyway, or overwrite the existing note's fields. */
     duplicateBehavior: DuplicateBehavior;
@@ -68,7 +75,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   ocr: { engine: 'local', orientation: 'auto', detMaxSide: 1536, boxThresh: 0.5, unclipRatio: 1.5, cloudApiKey: '', autoRotate: true },
-  display: { fontSize: 22, vertical: false, highlightLowConfidence: true, hardLineBreaks: false, furigana: 'ruby' },
+  display: { fontSize: 22, vertical: false, highlightLowConfidence: true, hardLineBreaks: false, furigana: 'ruby', theme: 'auto', highlight: '#facc15' },
   dictionaries: [
     { name: BUILTIN_JMDICT, enabled: true },
     { name: BUILTIN_KANJIDIC, enabled: true },
@@ -80,6 +87,7 @@ export const DEFAULT_SETTINGS: Settings = {
     deck: '',
     model: '',
     fields: {},
+    savedFields: {},
     tags: 'mobilemining',
     duplicateBehavior: 'new',
     duplicateScope: 'collection',
@@ -126,7 +134,12 @@ export function loadSettings(): Settings {
         parsed.anki.duplicateBehavior ??= parsed.anki.allowDuplicates ? 'new' : 'prevent';
         delete parsed.anki.allowDuplicates;
       }
-      return merge(DEFAULT_SETTINGS, parsed);
+      const s = merge(DEFAULT_SETTINGS, parsed);
+      // Earlier versions guessed too eagerly and filled switch fields (IsSentenceCard …):
+      // replace such a mapping with the recommended one for its note type.
+      if (looksMisguessed(s.anki.fields)) s.anki.fields = recommendedFields(Object.keys(s.anki.fields));
+      if (looksMisguessed(s.anki.export.fields)) s.anki.export.fields = recommendedFields(Object.keys(s.anki.export.fields));
+      return s;
     }
   } catch { /* ignore */ }
   const fresh = structuredClone(DEFAULT_SETTINGS);

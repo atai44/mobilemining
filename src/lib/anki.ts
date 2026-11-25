@@ -11,7 +11,7 @@ import type { Settings } from './settings';
 import { AnkiDroidClient, isNative, nativePostJson } from './native';
 import { glossaryText, renderGlossaryItem } from './yomitan/render';
 import { getMedia } from './yomitan/query';
-import { downstepPosition, pitchCategory, pitchHtml } from './pitch';
+import { pitchCategory, pitchGraphSvg, pitchHtml, pitchPositionHtml } from './pitch';
 
 export const MARKERS: { name: string; description: string }[] = [
   { name: 'expression', description: 'Dictionary form, e.g. 食べる' },
@@ -38,6 +38,7 @@ export const MARKERS: { name: string; description: string }[] = [
   { name: 'audio', description: 'Pronunciation audio (JapanesePod101)' },
   { name: 'pitch-accents', description: 'Pitch accent (overline notation)' },
   { name: 'pitch-accent-positions', description: 'Pitch accent downstep numbers' },
+  { name: 'pitch-accent-graphs', description: 'Pitch accent graphs' },
   { name: 'pitch-accent-categories', description: 'heiban / atamadaka / nakadaka / odaka / kifuku' },
   { name: 'frequencies', description: 'All frequency values' },
   { name: 'frequency-harmonic-rank', description: 'Harmonic mean of frequency ranks (for sorting)' },
@@ -49,6 +50,15 @@ export const MARKERS: { name: string; description: string }[] = [
   { name: 'document-title', description: 'Source title (also {source})' },
   { name: 'search-query', description: 'The text that was looked up' },
   { name: 'date', description: 'Date mined' },
+  { name: 'jpmn-primary-definition', description: 'JP Mining Note: first bilingual (else monolingual) dictionary' },
+  { name: 'jpmn-secondary-definition', description: 'JP Mining Note: other bilingual dictionaries' },
+  { name: 'jpmn-extra-definitions', description: 'JP Mining Note: other monolingual dictionaries' },
+  { name: 'jpmn-utility-dictionaries', description: 'JP Mining Note: name and reference dictionaries' },
+  { name: 'jpmn-pitch-accent-graphs', description: 'JP Mining Note: pitch graphs by dictionary' },
+  { name: 'jpmn-pitch-accent-positions', description: 'JP Mining Note: pitch positions by dictionary' },
+  { name: 'jpmn-frequencies', description: 'JP Mining Note: frequencies' },
+  { name: 'jpmn-min-freq', description: 'JP Mining Note: frequency for sorting' },
+  { name: 'jpmn-word-reading-hiragana', description: 'JP Mining Note: reading in hiragana' },
 ];
 
 export function dictSlug(name: string): string {
@@ -65,22 +75,23 @@ export const JPOD_MISSING_AUDIO_MD5 = '7e2c2f954ef6051373ba916f000168dc';
 
 // --- Glossary rendering (Yomitan-style HTML) --------------------------------------------------
 
-interface GlossaryOpts { tags: boolean; dictionary: boolean; plain?: boolean }
+interface GlossaryOpts { tags: boolean; dictionary: boolean; plain?: boolean; /** Scoped styles.css per dictionary, appended like Yomitan does. */ styles?: Record<string, string> }
 
-function definitionItems(d: Definition, jmTags: Record<string, string>, plain: boolean): { tags: string[]; items: string[] }[] {
+function definitionItems(d: Definition, jmTags: Record<string, string>, plain: boolean, bare = false): { tags: string[]; items: string[] }[] {
   if (d.senses) {
     return d.senses.map((s) => ({
       tags: [...s.p, ...(s.m ?? []), ...(s.f ?? []), ...(s.d ?? [])],
       items: s.g.map((g) => (plain ? g : escapeHtml(g))).concat(s.n ? [plain ? `(${s.n})` : `<small>(${escapeHtml(s.n)})</small>`] : []),
     }));
   }
-  const items = (d.glossary ?? []).map((g) => (plain ? glossaryText(g) : renderGlossaryItem(g, { dict: d.dict, images: 'placeholder' }))).filter(Boolean);
+  const items = (d.glossary ?? []).map((g) => (plain ? glossaryText(g) : renderGlossaryItem(g, { dict: d.dict, images: 'placeholder', bare }))).filter(Boolean);
   void jmTags;
   return [{ tags: d.tags, items }];
 }
 
 export function glossaryHtml(defs: Definition[], o: GlossaryOpts, jmTags: Record<string, string> = {}): string {
   const blocks: string[] = [];
+  const dictOf: string[] = [];
   for (const d of defs) {
     for (const { tags, items } of definitionItems(d, jmTags, !!o.plain)) {
       if (!items.length) continue;
@@ -92,13 +103,61 @@ export function glossaryHtml(defs: Definition[], o: GlossaryOpts, jmTags: Record
       const label = [...(o.tags ? tags.map((t) => escapeHtml(t)) : []), ...(o.dictionary ? [escapeHtml(d.dict)] : [])];
       const head = label.length ? `<i>(${label.join(', ')})</i> ` : '';
       const body = items.length === 1 ? items[0] : `<ul>${items.map((i) => `<li>${i}</li>`).join('')}</ul>`;
-      blocks.push(`<span data-dictionary="${escapeHtml(d.dict)}">${head}${body}</span>`);
+      blocks.push(`${head}${body}`);
+      dictOf.push(d.dict);
     }
   }
   if (o.plain) return blocks.join('\n');
   if (!blocks.length) return '';
-  const inner = blocks.length === 1 ? blocks[0] : `<ol>${blocks.map((b) => `<li>${b}</li>`).join('')}</ol>`;
-  return `<div style="text-align: left;" class="yomitan-glossary">${inner}</div>`;
+  // Yomitan's structure: <ol><li data-dictionary="…"> per definition (note types style and hide by it).
+  const attr = (i: number) => `data-dictionary="${escapeHtml(dictOf[i])}"`;
+  const inner = blocks.length === 1 ? `<span ${attr(0)}>${blocks[0]}</span>` : `<ol>${blocks.map((b, i) => `<li ${attr(i)}>${b}</li>`).join('')}</ol>`;
+  const css = [...new Set(dictOf)].map((d) => o.styles?.[d] ?? '').filter(Boolean).join('\n');
+  return `<div style="text-align: left;" class="yomitan-glossary">${inner}</div>${css ? `<style>${css}</style>` : ''}`;
+}
+
+// --- JP Mining Note's markers ----------------------------------------------------------------
+// jp-mining-note ships its own Yomitan templates; these reproduce their output, so cards made
+// here look like cards made with Yomitan on desktop.
+
+// Dictionary categories, after jp-mining-note's defaults.
+const JPMN_UTILITY = /^(NHK日本語発音アクセント.*|シン・漢字遣い参考|JMdict (Surface )?Forms|JMnedict.*|漢字林.*|複合語起源)$/i;
+const JPMN_BILINGUAL = /^(JMdict(?! (Surface )?Forms).*|.*Jitendex.*|新和英.*|.*和英.*辞典.*|日本語文法辞典.*|KireiCake|Nico\/Pixiv.*)$/i;
+const jpmnType = (dict: string) => (JPMN_UTILITY.test(dict) ? 'utility' : JPMN_BILINGUAL.test(dict) ? 'bilingual' : 'monolingual');
+
+function jpmnDefinitions(defs: Definition[], jmTags: Record<string, string>): string {
+  const items: string[] = [];
+  for (const d of defs) {
+    const dict = escapeHtml(d.dict);
+    for (const { tags, items: gloss } of definitionItems(d, jmTags, false, true)) {
+      if (!gloss.length) continue;
+      const tag = (cls: string, text: string) => `<span class="dict-group__tag dict-group__tag--${cls}"><span class="dict-group__tag-inner">${text}</span></span>`;
+      const body = gloss.length === 1 ? gloss[0] : `<ul>${gloss.map((g) => `<li>${g}</li>`).join('')}</ul>`;
+      items.push(`<li data-details="${dict}"><span class="dict-group__tag-list">${tags.map((t) => tag('name', escapeHtml(t))).join('')}${tag('dict', dict)}</span><span class="dict-group__glossary">${body}</span></li>`);
+    }
+  }
+  return items.length ? `<ol>${items.join('')}</ol>` : '';
+}
+
+function jpmnMarkers(r: TermResult, defs: Definition[], jmTags: Record<string, string>, rankFreqs: number[]): Record<string, string> {
+  // Primary definition: the first bilingual dictionary, else the first monolingual one, else whatever there is.
+  const first = (type: string) => defs.find((d) => jpmnType(d.dict) === type)?.dict;
+  const primary = first('bilingual') ?? first('monolingual') ?? defs[0]?.dict;
+  const of = (type: string) => defs.filter((d) => d.dict !== primary && jpmnType(d.dict) === type);
+  const group = (cls: string, dict: string, inner: string) =>
+    `<div class="${cls}__group" data-details="${escapeHtml(dict)}"><div class="${cls}__dictionary"><div class="${cls}__dictionary-inner">${escapeHtml(dict)}</div></div>${inner}</div>`;
+  return {
+    'jpmn-primary-definition': jpmnDefinitions(defs.filter((d) => d.dict === primary), jmTags),
+    'jpmn-secondary-definition': jpmnDefinitions(of('bilingual'), jmTags),
+    'jpmn-extra-definitions': jpmnDefinitions(of('monolingual'), jmTags),
+    'jpmn-utility-dictionaries': jpmnDefinitions(of('utility'), jmTags),
+    'jpmn-pitch-accent-graphs': r.pitches.map((p) => group('pa-graphs', p.dict, `<ol>${p.pitches.map((pi) => `<li>${pitchGraphSvg(p.reading, pi.position)}</li>`).join('')}</ol>`)).join(''),
+    'jpmn-pitch-accent-positions': r.pitches.map((p) => group('pa-positions', p.dict, `<ol>${p.pitches.map((pi) => `<li>${pitchPositionHtml(pi.position)}</li>`).join('')}</ol>`)).join(''),
+    'jpmn-frequencies': r.frequencies.map((f) =>
+      `<div class="frequencies__group" data-details="${escapeHtml(f.dict)}"><div class="frequencies__number"><span class="frequencies__number-inner">${escapeHtml(f.display)}</span></div><div class="frequencies__dictionary"><span class="frequencies__dictionary-inner">${escapeHtml(f.dict)}</span></div></div>`).join(''),
+    'jpmn-min-freq': rankFreqs.length ? String(harmonicMean(rankFreqs)) : '0',
+    'jpmn-word-reading-hiragana': escapeHtml(toHiragana(r.reading)),
+  };
 }
 
 // --- Marker values ---------------------------------------------------------------------------
@@ -114,6 +173,8 @@ export interface MarkerContext {
   ruby?: { start: number; end: number; text: string }[];
   /** Dictionaries whose frequencies are occurrence counts. */
   occurrenceFreqDicts?: Set<string>;
+  /** Each dictionary's styles.css, scoped to its content. */
+  styles?: Record<string, string>;
 }
 
 function clozeBodyKana(r: TermResult): string {
@@ -136,6 +197,11 @@ function clozeBodyKana(r: TermResult): string {
     if (consumed === n) break;
   }
   return toHiragana(readingOfPrefix + src.slice(n).join(''));
+}
+
+/** One item as is, several as an ordered list (how Yomitan's templates list pitch accents). */
+function yomitanList(items: string[]): string {
+  return items.length > 1 ? `<ol>${items.map((i) => `<li>${i}</li>`).join('')}</ol>` : items[0] ?? '';
 }
 
 function harmonicMean(values: number[]): number {
@@ -173,6 +239,7 @@ export function buildMarkerValues(r: TermResult, ctx: MarkerContext): Record<str
   sfPlain += cps.slice(pos).join('');
 
   const defs = r.definitions.length ? r.definitions : [];
+  const styles = ctx.styles;
   const firstDict = defs[0]?.dict;
   const firstDefs = defs.filter((d) => d.dict === firstDict);
   const pos_ = [...new Set(r.senses.flatMap((s) => s.p))];
@@ -189,14 +256,14 @@ export function buildMarkerValues(r: TermResult, ctx: MarkerContext): Record<str
     reading: r.reading,
     furigana: rubyHtml(r.expression, r.reading),
     'furigana-plain': ankiFurigana(r.expression, r.reading),
-    glossary: glossaryHtml(defs, { tags: true, dictionary: true }, jmTags),
+    glossary: glossaryHtml(defs, { tags: true, dictionary: true, styles }, jmTags),
     'glossary-brief': glossaryHtml(defs, { tags: false, dictionary: false }, jmTags),
-    'glossary-no-dictionary': glossaryHtml(defs, { tags: true, dictionary: false }, jmTags),
+    'glossary-no-dictionary': glossaryHtml(defs, { tags: true, dictionary: false, styles }, jmTags),
     'glossary-plain': glossaryHtml(defs, { tags: true, dictionary: true, plain: true }, jmTags),
     'glossary-plain-no-dictionary': glossaryHtml(defs, { tags: true, dictionary: false, plain: true }, jmTags),
-    'glossary-first': glossaryHtml(firstDefs, { tags: true, dictionary: true }, jmTags),
+    'glossary-first': glossaryHtml(firstDefs, { tags: true, dictionary: true, styles }, jmTags),
     'glossary-first-brief': glossaryHtml(firstDefs, { tags: false, dictionary: false }, jmTags),
-    'glossary-first-no-dictionary': glossaryHtml(firstDefs, { tags: true, dictionary: false }, jmTags),
+    'glossary-first-no-dictionary': glossaryHtml(firstDefs, { tags: true, dictionary: false, styles }, jmTags),
     sentence: escapeHtml(sentence),
     'sentence-bold': idx >= 0 ? `${escapeHtml(prefix)}<b>${escapeHtml(body)}</b>${escapeHtml(suffix)}` : escapeHtml(sentence),
     'sentence-furigana': sfHtml,
@@ -206,7 +273,9 @@ export function buildMarkerValues(r: TermResult, ctx: MarkerContext): Record<str
     'cloze-body-kana': escapeHtml(body ? clozeBodyKana(r) : ''),
     'cloze-suffix': escapeHtml(suffix),
     'pitch-accents': pitchList.length > 1 ? `<ol>${pitchList.map((p) => `<li>${pitchHtml(p.reading, p.pi)}</li>`).join('')}</ol>` : pitchList.map((p) => pitchHtml(p.reading, p.pi)).join(''),
-    'pitch-accent-positions': [...new Set(pitchList.map((p) => String(downstepPosition(p.pi.position))))].join(', '),
+    // Positions and graphs as Yomitan writes them: one item, or a list when there are several
+    'pitch-accent-positions': yomitanList([...new Set(pitchList.map((p) => pitchPositionHtml(p.pi.position)))]),
+    'pitch-accent-graphs': yomitanList([...new Set(pitchList.map((p) => pitchGraphSvg(p.reading, p.pi.position)))]),
     'pitch-accent-categories': [...new Set(pitchList.map((p) => pitchCategory(p.reading, p.pi.position, isConj)))].join(','),
     frequencies: r.frequencies.length ? `<ul style="text-align: left;">${r.frequencies.map((f) => `<li>${escapeHtml(f.dict)}: ${escapeHtml(f.display)}</li>`).join('')}</ul>` : '',
     'frequency-harmonic-rank': rankFreqs.length ? String(harmonicMean(rankFreqs)) : '9999999',
@@ -228,9 +297,10 @@ export function buildMarkerValues(r: TermResult, ctx: MarkerContext): Record<str
     'phonetic-transcriptions': '',
     date: new Date().toLocaleDateString(),
   };
+  Object.assign(values, jpmnMarkers(r, defs, jmTags, rankFreqs));
   // Per-dictionary markers, e.g. {single-glossary-jitendex.org-[2024-01-01]}
   for (const d of new Set(defs.map((x) => x.dict))) {
-    values[`single-glossary-${dictSlug(d)}`] = glossaryHtml(defs.filter((x) => x.dict === d), { tags: true, dictionary: false }, jmTags);
+    values[`single-glossary-${dictSlug(d)}`] = glossaryHtml(defs.filter((x) => x.dict === d), { tags: true, dictionary: false, styles }, jmTags);
   }
   for (const f of r.frequencies) values[`single-frequency-number-${dictSlug(f.dict)}`] ??= String(f.value);
   // Legacy names from earlier versions of this app
@@ -249,32 +319,7 @@ export function usesMarker(fields: Record<string, string>, marker: string): stri
   return Object.entries(fields).filter(([, t]) => t.includes(`{${marker}}`)).map(([f]) => f);
 }
 
-/** Guesses a marker for a note-type field name (Yomitan / Lapis / Kiku / JPMN conventions). */
-export function guessMarker(field: string): string {
-  const f = field.toLowerCase().replace(/[\s_-]/g, '');
-  const table: [RegExp, string][] = [
-    [/^(expression|word|vocab|vocabulary|term|front|kanji|target|key|targetword)$/, '{expression}'],
-    [/^(expressionfurigana|wordfurigana|vocabfurigana|furigana)$/, '{furigana-plain}'],
-    [/^(sentencefurigana)$/, '{sentence-furigana-plain}'],
-    [/^(reading|kana|vocabkana|wordreading|expressionreading)$/, '{reading}'],
-    [/^(expressionaudio|wordaudio|vocabaudio|audio|sound)$/, '{audio}'],
-    [/^(sentenceaudio)$/, ''],
-    [/^(maindefinition|meaning|definition|glossary|english|back|vocabdef|definitions)$/, '{glossary}'],
-    [/^(sentence|context|example|sentencekanji)$/, '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}'],
-    [/^(picture|image|photo|screenshot|definitionpicture)$/, '{image}'],
-    [/^(pitchposition|pitchaccent|pitch|graph)$/, '{pitch-accent-positions}'],
-    [/^(pitchcategories|pitchcategory)$/, '{pitch-accent-categories}'],
-    [/^(frequency|frequencies)$/, '{frequencies}'],
-    [/^(freqsort|frequencysort|freq)$/, '{frequency-harmonic-rank}'],
-    [/^(source|book|miscinfo|documenttitle)$/, '{document-title}'],
-    [/^(selectiontext)$/, ''],
-    [/^(pos|partofspeech)$/, '{part-of-speech}'],
-  ];
-  for (const [re, m] of table) if (re.test(f)) return m;
-  if (/sentence/.test(f)) return '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}';
-  if (/(meaning|definition|gloss)/.test(f)) return '{glossary}';
-  return '';
-}
+export { guessMarker } from './noteTypes';
 
 // --- AnkiConnect ---------------------------------------------------------------------------
 
@@ -315,6 +360,8 @@ export class AnkiConnect {
   createDeck(deck: string) { return this.invoke<number>('createDeck', { deck }); }
   createModel(params: Record<string, unknown>) { return this.invoke<unknown>('createModel', params); }
   findNotes(query: string) { return this.invoke<number[]>('findNotes', { query }); }
+  /** Which of these notes still exist in Anki. */
+  existingNotes(ids: number[]) { return ids.length ? this.invoke<number[]>('findNotes', { query: `nid:${ids.join(',')}` }) : Promise.resolve([]); }
   storeMediaFile(filename: string, data: string) { return this.invoke<string>('storeMediaFile', { filename, data }); }
   addNote(note: unknown) { return this.invoke<number>('addNote', { note }); }
   updateNoteFields(note: unknown) { const { modelName: _m, ...n } = note as Record<string, unknown>; return this.invoke<null>('updateNoteFields', { note: n }); }

@@ -39,10 +39,27 @@ export const view = signal<View>('capture');
 export const settings = signal<Settings>(loadSettings());
 export const dicts = signal<DictStatus | null>(null);
 export const scan = signal<Scan | null>(null);
+/** A photo or PDF is being opened (decoded): shown on the Read tab until the page appears. */
+export const opening = signal<string | null>(null);
+/** Dictionary install / import progress. Kept here so it survives leaving the Settings tab. */
+export const dictProgress = signal<{ stage: string; done: number; total: number } | null>(null);
+export const dictErrors = signal<string[]>([]);
 export const toast = signal<{ text: string; kind: 'ok' | 'error' | 'info' } | null>(null);
 export const ocrState = signal<{ state: 'idle' | 'loading' | 'ready' | 'error'; loaded?: number; total?: number; message?: string }>({ state: 'idle' });
 
 effect(() => saveSettings(settings.value));
+
+// Theme and highlight colour, applied to the page.
+effect(() => {
+  if (typeof document === 'undefined') return;
+  const d = settings.value.display;
+  const root = document.documentElement;
+  if (d.theme === 'auto') root.removeAttribute('data-theme');
+  else root.setAttribute('data-theme', d.theme);
+  const m = /^#?([0-9a-f]{6})$/i.exec(d.highlight ?? '');
+  const n = parseInt(m ? m[1] : 'facc15', 16);
+  root.style.setProperty('--hl', `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, 0.45)`);
+});
 
 export function updateSettings(fn: (s: Settings) => void) {
   const next = structuredClone(settings.value);

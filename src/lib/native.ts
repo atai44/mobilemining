@@ -13,6 +13,7 @@ interface AnkiDroidPlugin {
   addDeck(o: { name: string }): Promise<{ id: string }>;
   addModel(o: { name: string; fields: string[]; cards: string[]; qfmt: string[]; afmt: string[]; css: string }): Promise<{ id: string }>;
   findDuplicates(o: { model: string; key: string }): Promise<{ ids: string[] }>;
+  existing(o: { ids: string[] }): Promise<{ ids: string[] }>;
   addNote(o: { model: string; deck: string; fields: Record<string, string>; tags: string[] }): Promise<{ id: string }>;
   updateNote(o: { id: string; model: string; fields: Record<string, string> }): Promise<void>;
   addMedia(o: { name: string; ext: string; kind: 'image' | 'audio'; data: string }): Promise<{ tag: string; name: string }>;
@@ -61,6 +62,11 @@ export class AnkiDroidClient {
 
   async findDuplicateNotes(model: string, key: string): Promise<number[]> {
     return (await AnkiDroid.findDuplicates({ model, key })).ids.map(Number);
+  }
+
+  /** Which of these notes still exist in AnkiDroid. */
+  async existingNotes(ids: number[]): Promise<number[]> {
+    return ids.length ? (await AnkiDroid.existing({ ids: ids.map(String) })).ids.map(Number) : [];
   }
 
   /** Stores an image and returns the file name AnkiDroid gave it. */

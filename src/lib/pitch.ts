@@ -55,3 +55,32 @@ export function pitchHtml(reading: string, info: PitchInfo): string {
   });
   return `<span class="pitch" style="display:inline-block;line-height:1.6">${parts.join('')}</span>`;
 }
+
+/** Yomitan's downstep notation as its Anki templates write it: [6]. */
+export function pitchPositionHtml(position: number | string): string {
+  return `<span style="display:inline;"><span>[</span><span>${downstepPosition(position)}</span><span>]</span></span>`;
+}
+
+/** Yomitan's pitch graph (dots joined by a line, a triangle for the following particle), with inline styles. */
+export function pitchGraphSvg(reading: string, position: number | string): string {
+  const n = morae(reading).length;
+  if (!n) return '';
+  const pattern = pitchPattern(position, n);
+  const line = 'fill:none;stroke-width:5;stroke:currentColor;';
+  const dot = 'stroke-width:5;fill:currentColor;stroke:currentColor;';
+  const points: string[] = [];
+  let dots = '';
+  for (let i = 0; i < n; i++) {
+    const x = i * 50 + 25, y = pattern[i] ? 25 : 75;
+    points.push(`${x} ${y}`);
+    dots += pattern[i] && !pattern[i + 1]
+      ? `<circle cx="${x}" cy="${y}" r="15" style="${line}"></circle><circle cx="${x}" cy="${y}" r="5" style="fill:currentColor;"></circle>`
+      : `<circle cx="${x}" cy="${y}" r="15" style="${dot}"></circle>`;
+  }
+  const tx = n * 50 + 25, ty = pattern[n] ? 25 : 75;
+  return `<svg xmlns="http://www.w3.org/2000/svg" focusable="false" viewBox="0 0 ${50 * (n + 1)} 100" style="display:inline-block;vertical-align:middle;height:1.5em;">`
+    + `<path d="M${points.join(' L')}" style="${line}"></path>`
+    + `<path d="M${points[n - 1]} L${tx} ${ty}" style="${line}stroke-dasharray:5 5;"></path>`
+    + dots
+    + `<path d="M0 13 L15 -13 L-15 -13 Z" transform="translate(${tx},${ty})" style="${line}"></path></svg>`;
+}

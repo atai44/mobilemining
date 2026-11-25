@@ -8,6 +8,11 @@ export interface RenderOptions {
   dict: string;
   /** 'placeholder': <img data-media> resolved later from IndexedDB; 'alt': replace images with their alt text. */
   images: 'placeholder' | 'alt';
+  /**
+   * Markup as Yomitan's Anki templates produce it for JP Mining Note: no `gloss-sc-*` classes
+   * (data-sc-* attributes and inline styles stay), and links inside the dictionary as plain text.
+   */
+  bare?: boolean;
 }
 
 const CONTAINER_TAGS = new Set(['ruby', 'rt', 'rp', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'span', 'div', 'ol', 'ul', 'li', 'details', 'summary']);
@@ -71,7 +76,7 @@ function imageHtml(el: { path: string; width?: number; height?: number; title?: 
   else if (el.imageRendering === 'crisp-edges') styles.push('image-rendering:crisp-edges');
   if (el.verticalAlign && /^[a-z-]+$/.test(el.verticalAlign)) styles.push(`vertical-align:${el.verticalAlign}`);
   if (el.appearance === 'monochrome') styles.push('filter:grayscale(1)');
-  return `<img class="gloss-image${inline ? ' gloss-image-inline' : ''}" data-media-dict="${escapeHtml(opts.dict)}" data-media-path="${escapeHtml(el.path)}" alt="${escapeHtml(el.alt ?? '')}"${el.title ? ` title="${escapeHtml(el.title)}"` : ''} style="${styles.join(';')}">`;
+  return `<img${opts.bare ? '' : ` class="gloss-image${inline ? ' gloss-image-inline' : ''}"`} data-media-dict="${escapeHtml(opts.dict)}" data-media-path="${escapeHtml(el.path)}" alt="${escapeHtml(el.alt ?? '')}"${el.title ? ` title="${escapeHtml(el.title)}"` : ''} style="${styles.join(';')}">`;
 }
 
 export function renderStructured(node: StructuredContent | undefined, opts: RenderOptions, lang?: string): string {
@@ -88,14 +93,16 @@ export function renderStructured(node: StructuredContent | undefined, opts: Rend
   if (tag === 'a') {
     const href = typeof el.href === 'string' ? el.href : '';
     if (href.startsWith('?')) {
+      if (opts.bare) return inner;
       const q = new URLSearchParams(href.slice(1)).get('query') ?? '';
       return `<a class="gloss-link" data-query="${escapeHtml(q)}" href="#"${langAttr}>${inner}</a>`;
     }
+    if (/^https?:/i.test(href) && opts.bare) return `<a href="${escapeHtml(href)}"${langAttr}>${inner}</a>`;
     if (/^https?:/i.test(href)) return `<a class="gloss-link" href="${escapeHtml(href)}" target="_blank" rel="noreferrer noopener"${langAttr}>${inner}</a>`;
     return inner;
   }
   if (!CONTAINER_TAGS.has(tag)) return inner;
-  let attrs = ` class="gloss-sc-${tag}"${langAttr}${dataAttrs(el.data)}`;
+  let attrs = `${opts.bare ? '' : ` class="gloss-sc-${tag}"`}${langAttr}${dataAttrs(el.data)}`;
   if (tag === 'td' || tag === 'th') {
     if (el.colSpan) attrs += ` colspan="${Number(el.colSpan) | 0}"`;
     if (el.rowSpan) attrs += ` rowspan="${Number(el.rowSpan) | 0}"`;
@@ -104,7 +111,7 @@ export function renderStructured(node: StructuredContent | undefined, opts: Rend
   if (el.title) attrs += ` title="${escapeHtml(el.title)}"`;
   if (tag === 'details' && el.open) attrs += ' open';
   const html = `<${tag}${attrs}>${inner}</${tag}>`;
-  return tag === 'table' ? `<div class="gloss-sc-table-container">${html}</div>` : html;
+  return tag === 'table' && !opts.bare ? `<div class="gloss-sc-table-container">${html}</div>` : html;
 }
 
 export function renderGlossaryItem(item: GlossaryItem, opts: RenderOptions): string {
@@ -113,7 +120,7 @@ export function renderGlossaryItem(item: GlossaryItem, opts: RenderOptions): str
   if (!item || typeof item !== 'object') return '';
   if (item.type === 'text') return textHtml(item.text);
   if (item.type === 'image') return imageHtml(item, opts, false);
-  if (item.type === 'structured-content') return `<span class="gloss-sc" data-dictionary="${escapeHtml(opts.dict)}">${renderStructured(item.content, opts)}</span>`;
+  if (item.type === 'structured-content') return opts.bare ? `<span>${renderStructured(item.content, opts)}</span>` : `<span class="gloss-sc" data-dictionary="${escapeHtml(opts.dict)}">${renderStructured(item.content, opts)}</span>`;
   return '';
 }
 

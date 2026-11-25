@@ -45,6 +45,7 @@ page.on('console', (m) => m.type() === 'error' && console.error('[console]', m.t
 // Mock AnkiConnect (stateful: remembers added notes for duplicate checks)
 const ankiCalls = [];
 const added = new Map(); // first-field value -> note id
+const deleted = new Set(); // notes deleted in (mock) Anki
 let nextId = 1700000000000;
 // Pronunciation audio: 読む has a recording; every other word gets a clip as long as
 // JapanesePod101's "audio not available" one (5.651 s).
@@ -67,15 +68,19 @@ await page.route('http://127.0.0.1:8765/**', async (route) => {
     case 'version': result = 6; break;
     case 'requestPermission': result = { permission: 'granted' }; break;
     case 'deckNames': result = ['Default', 'Mining']; break;
-    case 'modelNames': result = ['Basic', 'Japanese Sentence', 'Lapis']; break;
+    case 'modelNames': result = ['Basic', 'Japanese Sentence', 'Lapis', 'JP Mining Note']; break;
     case 'modelFieldNames':
-      result = p.modelName === 'Lapis'
+      result = p.modelName === 'JP Mining Note'
+        ? ['Key', 'Word', 'WordReading', 'PAOverride', 'PrimaryDefinition', 'PrimaryDefinitionPicture', 'Sentence', 'SentenceReading', 'IsSentenceCard', 'IsTargetedSentenceCard', 'PASeparateSentenceCard', 'Picture', 'WordAudio', 'PAGraphs', 'PAPositions', 'PASilence', 'FrequenciesStylized', 'ExtraDefinitions']
+        : p.modelName === 'Lapis'
         ? ['Expression', 'ExpressionFurigana', 'MainDefinition', 'Sentence', 'SentenceFurigana', 'PitchPosition', 'FreqSort', 'Picture']
         : p.modelName === 'MobileMining'
           ? ['Word', 'Reading', 'Furigana', 'Meaning', 'Sentence', 'SentenceFurigana', 'Picture', 'Audio', 'PitchAccent', 'Frequency', 'Source']
           : ['Word', 'Reading', 'Sentence', 'Meaning', 'Picture', 'Audio'];
       break;
     case 'findNotes': {
+      // "nid:1,2": which of these notes still exist
+      if (p.query.startsWith('nid:')) { result = p.query.slice(4).split(',').map(Number).filter((id) => [...added.values()].includes(id) && !deleted.has(id)); break; }
       const m = /:(.+?)"$/.exec(p.query.split('" "')[1] ?? '');
       const id = m && added.get(m[1]);
       result = id ? [id] : [];
@@ -125,6 +130,34 @@ await page.waitForSelector('.field-map');
 const mapping = await page.$$eval('[data-testid=anki-settings] .field-map', (els) => els.map((e) => [e.querySelector('.field-name').textContent, e.querySelector('input').value]));
 check(JSON.stringify(mapping) === JSON.stringify([['Word', '{expression}'], ['Reading', '{reading}'], ['Sentence', '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}'], ['Meaning', '{glossary}'], ['Picture', '{image}'], ['Audio', '{audio}']]), `fields auto-mapped: ${JSON.stringify(mapping)}`);
 await shot('02-settings');
+// Known note types get their own mapping (switch fields stay empty), and each note type keeps its mapping
+{
+  const val = (f) => page.$eval(`[data-testid=anki-settings] [data-field="${f}"]`, (e) => e.value);
+  await page.selectOption('[data-testid=anki-model]', 'JP Mining Note');
+  await page.waitForSelector('[data-field="PrimaryDefinition"]');
+  const jp = [await val('PrimaryDefinition'), await val('IsSentenceCard'), await val('PASeparateSentenceCard'), await val('PrimaryDefinitionPicture'), await val('PAGraphs'), await val('Picture')];
+  check(jp.join('|') === '{jpmn-primary-definition}||||{jpmn-pitch-accent-graphs}|{image}', `JP Mining Note gets its recommended fields (${jp.join(' | ')})`);
+  await page.fill('[data-testid=anki-settings] [data-field="SentenceReading"]', '{sentence-furigana-plain}');
+  await page.selectOption('[data-testid=anki-model]', 'Japanese Sentence');
+  await page.waitForSelector('[data-field="Meaning"]');
+  await page.selectOption('[data-testid=anki-model]', 'JP Mining Note');
+  await page.waitForSelector('[data-field="SentenceReading"]');
+  const kept = await val('SentenceReading');
+  await page.click('[data-testid=fields-reset]');
+  await page.waitForFunction(() => document.querySelector('[data-testid=anki-settings] [data-field="SentenceReading"]')?.value === '');
+  check(kept === '{sentence-furigana-plain}', `each note type keeps its mapping; reset restores the recommended one (${kept})`);
+  await page.selectOption('[data-testid=anki-model]', 'Japanese Sentence');
+  await page.waitForSelector('[data-field="Meaning"]');
+  // Appearance
+  await page.click('[data-testid=theme] >> text=Dark');
+  await page.$eval('[data-testid=highlight-color]', (e) => { e.value = '#00aaff'; e.dispatchEvent(new Event('input', { bubbles: true })); });
+  const look = await page.evaluate(() => [document.documentElement.dataset.theme, getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(), document.documentElement.style.getPropertyValue('--hl')]);
+  await page.click('[data-testid=theme] >> text=Light');
+  const light = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
+  check(look[0] === 'dark' && look[1] === '#161513' && look[2] === 'rgba(0, 170, 255, 0.45)' && light === '#f6f5f2', `theme and highlight colour settings (${look.join(' ')}; light ${light})`);
+  await page.click('[data-testid=theme] >> text=Auto');
+  check(!(await page.$eval('.settings', (e) => e.innerText)).includes('wasm'), 'no engine jargon in Settings');
+}
 
 const toText = async () => { if (await page.$('[data-testid=show-text]')) await page.click('[data-testid=show-text]'); await page.waitForSelector('[data-testid=reader]'); };
 const toImage = async () => { if (await page.$('[data-testid=show-image]')) await page.click('[data-testid=show-image]'); await page.waitForSelector('[data-testid=image-reader]'); };
@@ -170,6 +203,8 @@ for (const fx of ['horizontal.png', 'vertical.png', 'rotated.png', 'vertical2.pn
 
 // 3. One-tap add from the popup, then "view note"
 await ocr('horizontal.png');
+check(await page.$$eval('[data-testid=reader] span.low', (els) => els.every((e) => /[\p{L}\p{N}]/u.test(e.textContent))), 'punctuation is never marked as unsure');
+check(!(await page.$('.image-reader .toolbar [title="Re-read"]')), 'no separate re-read button in the photo toolbar');
 await tapChar('読');
 const head = await page.$eval('[data-testid=popup] .entry .headword', (e) => e.textContent);
 const reasons = await page.$eval('[data-testid=popup] .entry .reasons', (e) => e.textContent).catch(() => '');
@@ -282,6 +317,7 @@ for (const fx of ['dense-vertical.png', 'dense-vertical-tilt.png', 'dense-horizo
 {
   await tab('Capture');
   const t0 = Date.now();
+  await page.evaluate(() => { window.__sawOpening = false; new MutationObserver(() => { if (document.querySelector('[data-testid=opening]')) window.__sawOpening = true; }).observe(document.body, { childList: true, subtree: true }); });
   await page.setInputFiles('[data-testid=file-input]', join(root, 'tests/fixtures/dense-vertical.png'));
   await page.waitForSelector('[data-testid=image-reader] img');
   const shownMs = Date.now() - t0;
@@ -296,6 +332,7 @@ for (const fx of ['dense-vertical.png', 'dense-vertical-tilt.png', 'dense-horizo
   const stillReading = await page.$eval('[data-testid=ocr-progress]', (e) => e.innerText).catch(() => '');
   console.log(`  photo shown after ${shownMs}ms; popup ${Date.now() - t1}ms after tapping an unread line (${stillReading.split('—')[0].trim() || 'finished'})`);
   check(shownMs < 1500, 'photo is shown before OCR');
+  check(await page.evaluate(() => window.__sawOpening), 'an "Opening…" screen shows at once while the photo is decoded');
   check(/Reading \d+\/\d+/.test(stillReading), 'tapped line was read before the rest of the page');
   await shot('06b-progressive');
   await page.keyboard.press('Escape');
@@ -508,7 +545,7 @@ if (add) {
   check(f.MainDefinition.includes('to read (a book)') && /<img src="mobilemining_dict_\w+\.png"/.test(f.MainDefinition), 'single-glossary marker with dictionary image uploaded');
   check(f.SentenceFurigana.includes('図書館[としょかん]') && f.SentenceFurigana.includes('昨日[きのう]'), `sentence furigana from the photo: ${f.SentenceFurigana}`);
   check(f.Sentence === '昨日は図書館で本を<b>読んだ</b>。', 'sentence without furigana');
-  check(f.PitchPosition === '1' && f.FreqSort === '830', 'pitch and frequency markers');
+  check(f.PitchPosition === '<span style="display:inline;"><span>[</span><span>1</span><span>]</span></span>' && f.FreqSort === '830', `pitch and frequency markers in Yomitan's format (${f.PitchPosition.replace(/<[^>]+>/g, '')})`);
   check(/^<img src="mobilemining_\d+\.jpg">$/.test(f.Picture), '{screenshot} maps to the photo');
 }
 
@@ -577,13 +614,6 @@ await shot('08b-zoomed');
   await cdp.detach();
 }
 
-// 8. One-click note type setup
-await tab('Settings');
-await page.click('[data-testid=anki-setup]');
-await page.waitForSelector('[data-field="Meaning"]', { timeout: 20_000 });
-check(lastCall('createModel')?.params.modelName === 'MobileMining', 'creates the MobileMining note type');
-check(await page.$eval('[data-field="Meaning"]', (e) => e.value) === '{glossary}', 'MobileMining fields mapped');
-
 // Backup & restore into a fresh browser profile
 {
   await tab('Settings');
@@ -600,13 +630,32 @@ check(await page.$eval('[data-field="Meaning"]', (e) => e.value) === '{glossary}
   console.log('  ' + rep.replace(/\n/g, '\n  '));
   const dictTitles = await p2.$$eval('.dict-title', (els) => els.map((e) => e.textContent));
   const model = await p2.evaluate(() => JSON.parse(localStorage.getItem('mobilemining.settings') ?? '{}').anki?.model ?? '');
-  check(rep.includes('Settings') && dictTitles.includes('Test Dict') && dictTitles.includes('Test Freq') && /✓ [1-9]\d* mined/.test(rep) && model === 'MobileMining', `backup restored in a new browser (dicts: ${dictTitles.join(', ')}; note type ${model})`);
+  check(rep.includes('Settings') && dictTitles.includes('Test Dict') && dictTitles.includes('Test Freq') && /✓ [1-9]\d* mined/.test(rep) && model === 'Lapis', `backup restored in a new browser (dicts: ${dictTitles.join(', ')}; note type ${model})`);
   await ctx2.close();
 }
 
 // 9. Mined list
 await tab('Mined');
 await page.waitForSelector('.note');
+// A card deleted in Anki is noticed (status re-checked) and can be sent again
+{
+  const status = () => page.$$eval('.note .badge', (b) => b.map((x) => x.textContent).join(','));
+  const before = await status();
+  deleted.add([...added.values()].at(-1));
+  await page.click('[data-testid=resync]');
+  await page.waitForFunction((b) => [...document.querySelectorAll('.note .badge')].map((x) => x.textContent).join(',') !== b, before, { timeout: 10_000 }).catch(() => {});
+  const after = await status();
+  const sends = (await page.$$('[data-testid=note-send]')).length;
+  check(before.split(',').filter((x) => x === 'in Anki').length - after.split(',').filter((x) => x === 'in Anki').length === 1 && sends >= 1, `card deleted in Anki is marked as not sent (${before} → ${after})`);
+  // Send it again, then mark it as not in Anki by hand
+  const adds = ankiCalls.filter((c) => c.action === 'addNote').length;
+  await page.click('[data-testid=note-send] >> nth=0');
+  await page.waitForSelector('[data-testid=note-unmark]', { timeout: 15_000 });
+  const resent = ankiCalls.filter((c) => c.action === 'addNote').length - adds;
+  await page.click('[data-testid=note-unmark] >> nth=0');
+  await page.waitForFunction(() => !document.querySelector('[data-testid=note-unmark]'));
+  check(resent === 1, `the card is sent again; it can also be marked as not in Anki by hand (${resent} add)`);
+}
 check((await page.$$('.note')).length === 3, 'mined cards listed');
 await shot('09-mined');
 

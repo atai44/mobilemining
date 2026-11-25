@@ -127,6 +127,18 @@ public class AnkiDroidPlugin extends Plugin {
         });
     }
 
+    /** Which of these note ids still exist (to notice cards deleted in AnkiDroid). */
+    @PluginMethod
+    public void existing(PluginCall call) {
+        with(call, (anki) -> {
+            java.util.List<Long> ids = new java.util.ArrayList<>();
+            for (String s : strings(call.getArray("ids"))) ids.add(Long.parseLong(s));
+            JSArray out = new JSArray();
+            for (Long id : anki.existing(ids)) out.put(String.valueOf(id));
+            call.resolve(new JSObject().put("ids", out));
+        });
+    }
+
     @PluginMethod
     public void addNote(PluginCall call) {
         with(call, (anki) -> {

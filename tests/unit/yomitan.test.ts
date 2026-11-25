@@ -3,6 +3,7 @@ import { convertKanjiRow, convertTermRow } from '../../src/lib/yomitan/importer'
 import { renderGlossaryItem, renderStructured, glossaryText } from '../../src/lib/yomitan/render';
 import { findTerms, parseFrequency, yomitanConds } from '../../src/lib/lookup';
 import { buildMarkerValues, fillTemplate, guessMarker, notesToTsv } from '../../src/lib/anki';
+import { knownNoteType, looksMisguessed, recommendedFields } from '../../src/lib/noteTypes';
 import { pitchCategory, pitchHtml, pitchPattern, morae } from '../../src/lib/pitch';
 import { applyYomitanProfile, parseYomitanSettings } from '../../src/lib/yomitan/settingsImport';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings';
@@ -106,19 +107,48 @@ describe('Anki markers', () => {
     expect(v['glossary-first']).toContain('Jitendex');
     expect(v['glossary-first']).not.toContain('Other');
     expect(v['single-glossary-other']).toContain('to recite');
-    expect(v['pitch-accent-positions']).toBe('1');
+    // Yomitan's own formats
+    expect(v['pitch-accent-positions']).toBe('<span style="display:inline;"><span>[</span><span>1</span><span>]</span></span>');
+    expect(v['pitch-accent-graphs']).toMatch(/^<svg xmlns="http:\/\/www.w3.org\/2000\/svg" focusable="false" viewBox="0 0 150 100"/);
+    expect(v.glossary).toMatch(/<ol><li data-dictionary="Jitendex">/);
+    // JP Mining Note's formats (as its Yomitan templates write them)
+    expect(v['jpmn-primary-definition']).toMatch(/^<ol><li data-details="Jitendex"><span class="dict-group__tag-list">.*<span class="dict-group__tag dict-group__tag--dict"><span class="dict-group__tag-inner">Jitendex<\/span><\/span><\/span><span class="dict-group__glossary">/);
+    expect(v['jpmn-primary-definition']).not.toContain('Other');
+    expect(v['jpmn-primary-definition']).not.toContain('gloss-sc');
+    expect(v['jpmn-extra-definitions']).toContain('<li data-details="Other">');
+    expect(v['jpmn-secondary-definition']).toBe('');
+    expect(v['jpmn-pitch-accent-positions']).toBe('<div class="pa-positions__group" data-details="Kanjium"><div class="pa-positions__dictionary"><div class="pa-positions__dictionary-inner">Kanjium</div></div><ol><li><span style="display:inline;"><span>[</span><span>1</span><span>]</span></span></li></ol></div>');
+    expect(v['jpmn-pitch-accent-graphs']).toContain('<div class="pa-graphs__group" data-details="Kanjium">');
+    expect(v['jpmn-frequencies']).toBe('<div class="frequencies__group" data-details="JPDB"><div class="frequencies__number"><span class="frequencies__number-inner">830㋕</span></div><div class="frequencies__dictionary"><span class="frequencies__dictionary-inner">JPDB</span></div></div>');
+    expect(v['jpmn-min-freq']).toBe('830');
+    expect(v['jpmn-word-reading-hiragana']).toBe('よむ');
     expect(v['pitch-accent-categories']).toBe('atamadaka');
     expect(v['frequency-harmonic-rank']).toBe('830');
     expect(v.conjugation).toBe('negative « past');
     expect(fillTemplate('{unknown-marker}x', v)).toBe('x');
   });
-  it('guesses markers for common note types (Lapis/Kiku)', () => {
+  it('guesses cautiously for unknown note types', () => {
     expect(guessMarker('Expression')).toBe('{expression}');
-    expect(guessMarker('ExpressionFurigana')).toBe('{furigana-plain}');
-    expect(guessMarker('MainDefinition')).toBe('{glossary}');
     expect(guessMarker('Sentence')).toBe('{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}');
     expect(guessMarker('Picture')).toBe('{image}');
-    expect(guessMarker('FreqSort')).toBe('{frequency-harmonic-rank}');
+    // Switch fields and look-alikes stay empty: filling them changes the card type
+    for (const f of ['IsSentenceCard', 'IsTargetedSentenceCard', 'PASeparateSentenceCard', 'PrimaryDefinitionPicture', 'DefinitionPicture', 'SentenceAudio', 'AltDisplayPASentenceCard']) expect(guessMarker(f)).toBe('');
+  });
+  it('knows JP Mining Note and Lapis', () => {
+    const jpmn = ['Key', 'Word', 'WordReading', 'PAOverride', 'PrimaryDefinition', 'PrimaryDefinitionPicture', 'Sentence', 'SentenceReading', 'IsSentenceCard', 'IsTargetedSentenceCard', 'PASeparateSentenceCard', 'Picture', 'WordAudio', 'PAGraphs', 'PAPositions', 'PASilence', 'WordReadingHiragana', 'FrequenciesStylized', 'FrequencySort', 'SecondaryDefinition', 'ExtraDefinitions', 'UtilityDictionaries', 'Comment'];
+    expect(knownNoteType(jpmn)?.name).toBe('JP Mining Note');
+    const m = recommendedFields(jpmn);
+    expect(m).toMatchObject({ Key: '{expression}', WordReading: '{furigana-plain}', PrimaryDefinition: '{jpmn-primary-definition}', PAGraphs: '{jpmn-pitch-accent-graphs}', FrequenciesStylized: '{jpmn-frequencies}', PASilence: '[sound:_silence.wav]', WordAudio: '{audio}', Picture: '{image}' });
+    for (const f of ['IsSentenceCard', 'IsTargetedSentenceCard', 'PASeparateSentenceCard', 'PrimaryDefinitionPicture', 'SentenceReading', 'Comment']) expect(m[f]).toBe('');
+    const lapis = ['Expression', 'ExpressionFurigana', 'ExpressionReading', 'ExpressionAudio', 'SelectionText', 'MainDefinition', 'DefinitionPicture', 'Sentence', 'SentenceFurigana', 'SentenceAudio', 'Picture', 'Glossary', 'Hint', 'IsWordAndSentenceCard', 'IsClickCard', 'IsSentenceCard', 'IsAudioCard', 'PitchPosition', 'PitchCategories', 'Frequency', 'FreqSort', 'MiscInfo'];
+    expect(knownNoteType(lapis)?.name).toBe('Lapis');
+    const l = recommendedFields(lapis);
+    expect(l).toMatchObject({ Expression: '{expression}', ExpressionAudio: '{audio}', MainDefinition: '{glossary-first}', Glossary: '{glossary}', Picture: '{image}', PitchPosition: '{pitch-accent-positions}' });
+    for (const f of ['IsWordAndSentenceCard', 'IsSentenceCard', 'DefinitionPicture', 'SentenceFurigana', 'SentenceAudio']) expect(l[f]).toBe('');
+    // Mappings made by the old, greedy guessing are recognized (and replaced on load)
+    expect(looksMisguessed({ Sentence: '{sentence}', IsSentenceCard: '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}' })).toBe(true);
+    expect(looksMisguessed(m)).toBe(false);
+    expect(looksMisguessed(l)).toBe(false);
   });
 });
 
@@ -174,6 +204,19 @@ describe('Yomitan settings import', () => {
     const lines = notesToTsv([note], s).trim().split('\n');
     expect(lines.slice(0, 6)).toEqual(['#separator:tab', '#html:true', '#notetype:Lapis', '#deck:Mining', '#columns:Expression\tSentence\tMeaning\tPicture\ttags', '#tags column:5']);
     expect(lines[6].split('\t')).toEqual(['読む', '本を<b>読んだ</b>。', '"<div class=""g"">to read</div>"', '', 'mm']);
+  });
+  it('uses the recommended fields for JP Mining Note without JPMN templates', () => {
+    const s = structuredClone(DEFAULT_SETTINGS);
+    const f = (value: string) => ({ value, overwriteMode: 'coalesce' });
+    const fields = { Key: f('{expression}'), Word: f('{expression}'), WordReading: f('{furigana-plain}'), PrimaryDefinition: f('{glossary}'), Sentence: f('{sentence}'), IsSentenceCard: f(''), Picture: f(''), WordAudio: f('{audio}'), PAGraphs: f('{pitch-accent-graphs}'), PAPositions: f('{pitch-accent-positions}'), FrequenciesStylized: f(''), ExtraDefinitions: f('') };
+    const sum = applyYomitanProfile(s, { options: { anki: { cardFormats: [{ type: 'term', deck: 'vn', model: 'JP Mining Note', fields }] } } }, []);
+    expect(s.anki.fields).toMatchObject({ PrimaryDefinition: '{jpmn-primary-definition}', Sentence: '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}', IsSentenceCard: '', Picture: '{image}', PAGraphs: '{jpmn-pitch-accent-graphs}', FrequenciesStylized: '{jpmn-frequencies}', ExtraDefinitions: '{jpmn-extra-definitions}' });
+    expect(s.anki.savedFields['JP Mining Note']).toEqual(s.anki.fields);
+    expect(sum.notes.join(' ')).toContain('recommended fields');
+    // A profile that already uses JPMN's markers is taken as it is
+    const s2 = structuredClone(DEFAULT_SETTINGS);
+    applyYomitanProfile(s2, { options: { anki: { cardFormats: [{ type: 'term', deck: 'vn', model: 'JP Mining Note', fields: { ...fields, PrimaryDefinition: f('{jpmn-primary-definition}'), Sentence: f('{sentence}') } }] } } }, []);
+    expect(s2.anki.fields.Sentence).toBe('{sentence}');
   });
   it('supports the older anki.terms format and rejects other files', () => {
     const s = structuredClone(DEFAULT_SETTINGS);

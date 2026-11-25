@@ -60,12 +60,17 @@ uploaded unless you turn on the optional cloud OCR engine. After the first load 
     - Connects automatically and shows its status.
     - One tap on ＋ adds the card; ✎ opens an editor first; 📖 opens the note in Anki.
     - Duplicate check with Yomitan's *prevent / add new / overwrite* behaviors and scopes.
-    - **Same field markers as Yomitan**, including `{single-glossary-<dict>}`. Typical Lapis, Kiku and JPMN fields are
-      mapped automatically.
-    - "Set up note type & deck for me" creates a ready-made `MobileMining` note type.
+    - **Same field markers as Yomitan**, including `{single-glossary-<dict>}` and `{pitch-accent-graphs}`, with the
+      same HTML (`<li data-dictionary>`, dictionary styles attached), so note types styled for Yomitan look right.
+    - **JP Mining Note and Lapis / Kiku are recognized** and get their recommended mapping; switch fields such as
+      `IsSentenceCard` stay empty. JP Mining Note's own markers (`{jpmn-primary-definition}`, `{jpmn-pitch-accent-graphs}`,
+      `{jpmn-frequencies}`, …) are implemented here, so no custom Yomitan templates are needed. Other note types are
+      guessed cautiously (exact field names only). Each note type keeps its own mapping.
+    - The Mined list re-checks which cards still exist in Anki, so a card deleted there can be sent again.
   - **Import from Yomitan**: load a Yomitan settings backup (*Settings → Backup → Export Settings*) to bring over your
     AnkiConnect server and key, deck, note type, field markers, tags, duplicate options, and dictionary order. Custom
-    Handlebars templates are not supported; standard markers are.
+    Handlebars templates are not supported; standard markers and JP Mining Note's are. (A JP Mining Note profile
+    without JPMN's templates gets the recommended mapping instead.)
   - **AnkiMobile (iOS)**: fills AnkiMobile's Add screen through its `anki://x-callback-url/addnote` link.
   - **AnkiDroid (share)**: Android's share sheet opens AnkiDroid's note editor with two fields filled (text only).
   - **Export → Anki package**: the best option on Android without AnkiConnect. Cards are kept on the device; *Mined →

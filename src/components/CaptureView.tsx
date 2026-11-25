@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { dicts, ocrState, refreshDicts, scan, settings, showToast, view } from '../store';
+import { dictProgress, dicts, ocrState, refreshDicts, scan, settings, showToast, view } from '../store';
 import { installDictionaries } from '../lib/db';
 import { ensureOcrEngine, openImage, openPdfFile, openText } from '../scanActions';
 import { isAndroid } from '../lib/anki';
@@ -12,7 +12,12 @@ function fmtMB(n: number) {
 }
 
 const isPdf = (f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
-const openFile = (f: File) => (isPdf(f) ? openPdfFile(f, f.name.replace(/\.pdf$/i, '')) : openImage(f, f.name));
+/** A source name for cards: the file's name, unless it is just a camera's serial name. */
+const sourceName = (f: File) => {
+  const base = f.name.replace(/\.[a-z0-9]+$/i, '');
+  return /^(jpe?g|img|image|pxl|dsc|dcim|photo|screenshot|mvimg|[0-9a-f-]{20,})?[\s_\-.\d]*$/i.test(base) ? '' : base;
+};
+const openFile = (f: File) => (isPdf(f) ? openPdfFile(f, f.name.replace(/\.pdf$/i, '')) : openImage(f, sourceName(f)));
 
 export function CaptureView() {
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -106,7 +111,8 @@ export function CaptureView() {
 }
 
 function DictionaryCard() {
-  const [progress, setProgress] = useState<{ stage: string; done: number; total: number } | null>(null);
+  const progress = dictProgress.value;
+  const setProgress = (p: typeof dictProgress.value) => (dictProgress.value = p);
   const [error, setError] = useState<string | null>(null);
   const d = dicts.value;
   const installed = !!d?.jmdict;
@@ -132,7 +138,7 @@ function DictionaryCard() {
   return (
     <div class="card notice">
       <h2>Dictionary</h2>
-      <p class="muted small">JMdict + KANJIDIC2 · 10 MB · offline</p>
+      {!installed && <p class="muted small">JMdict + KANJIDIC2 · 10 MB · offline</p>}
       {progress ? (
         <div>
           <div class="progress-label">

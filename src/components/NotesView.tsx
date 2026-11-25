@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { deleteNote, listNotes, saveNote, type MinedNote } from '../lib/db';
-import { MM_FIELDS, notesToTsv, sendToAnkiConnect, usesApi, viewNote } from '../lib/anki';
+import { client, MM_FIELDS, notesToTsv, sendToAnkiConnect, usesApi, viewNote } from '../lib/anki';
 import { saveFile } from '../lib/native';
 import { settings, showToast } from '../store';
 
@@ -23,6 +23,34 @@ export function NotesView() {
       n.error = String((e as Error).message ?? e);
     }
     await saveNote(n);
+  };
+
+  /**
+   * Cards deleted in Anki are no longer "in Anki": check the ones we added and mark the missing
+   * ones as not sent, so they can be sent again.
+   */
+  const resync = async (quiet: boolean) => {
+    const added = (await listNotes()).filter((n) => n.status === 'added' && n.ankiNoteId);
+    if (!canSend || !added.length) { if (!quiet) showToast('Nothing to check', 'info'); return; }
+    try {
+      const alive = new Set(await client(st).existingNotes(added.map((n) => n.ankiNoteId!)));
+      const gone = added.filter((n) => !alive.has(n.ankiNoteId!));
+      for (const n of gone) { n.status = 'pending'; n.ankiNoteId = undefined; await saveNote(n); }
+      if (gone.length) await reload();
+      if (gone.length || !quiet) showToast(gone.length ? `${gone.length} no longer in Anki` : 'Up to date', gone.length ? 'info' : 'ok');
+    } catch (e) {
+      if (!quiet) showToast(String((e as Error).message ?? e), 'error');
+    }
+  };
+  useEffect(() => { resync(true); }, [st.anki.method]);
+
+  /** Marks a card as not in Anki (to send it again). */
+  const unmark = async (n: MinedNote) => {
+    n.status = 'pending';
+    n.ankiNoteId = undefined;
+    n.error = undefined;
+    await saveNote(n);
+    reload();
   };
 
   const sendPending = async () => {
@@ -77,19 +105,20 @@ export function NotesView() {
       <div class="row wrap">
         {canSend && <button class="button primary" disabled={busy || !pendingCount} onClick={sendPending}>{busy ? 'Sending…' : `Send ${pendingCount}`}</button>}
         {packaging && <button class="button primary" disabled={busy || !pendingCount} onClick={sendPackage} title="Anki package (.apkg)" data-testid="send-apkg">{busy ? '…' : `Send ${pendingCount}`}</button>}
+        {canSend && <button class="button" disabled={busy} onClick={() => resync(false)} title="Check which cards are still in Anki" data-testid="resync">↻ Check Anki</button>}
         <button class="button" disabled={!notes.length} onClick={exportTsv} title="Anki: File → Import">TSV ↓</button>
       </div>
       {!notes.length && <p class="muted center">Empty</p>}
       <ul class="note-list">
         {notes.map((n) => (
-          <NoteItem key={n.id} n={n} canSend={canSend} onView={n.ankiNoteId && canSend ? () => viewNote(st, n.ankiNoteId!).catch((e) => showToast(String(e.message ?? e), 'error')) : undefined} onSend={async () => { await send(n); reload(); }} onDelete={async () => { await deleteNote(n.id!); reload(); }} />
+          <NoteItem key={n.id} n={n} canSend={canSend} onView={n.ankiNoteId && canSend ? () => viewNote(st, n.ankiNoteId!).catch((e) => showToast(String(e.message ?? e), 'error')) : undefined} onSend={async () => { await send(n); reload(); }} onUnmark={() => unmark(n)} onDelete={async () => { await deleteNote(n.id!); reload(); }} />
         ))}
       </ul>
     </div>
   );
 }
 
-function NoteItem({ n, canSend, onSend, onDelete, onView }: { n: MinedNote; canSend: boolean; onSend: () => void; onDelete: () => void; onView?: () => void }) {
+function NoteItem({ n, canSend, onSend, onUnmark, onDelete, onView }: { n: MinedNote; canSend: boolean; onSend: () => void; onUnmark: () => void; onDelete: () => void; onView?: () => void }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!n.image) return;
@@ -109,7 +138,8 @@ function NoteItem({ n, canSend, onSend, onDelete, onView }: { n: MinedNote; canS
         <div class="muted small">{(n.fields['glossary-plain-no-dictionary'] ?? n.fields['glossary-brief'] ?? '').split('\n')[0].replace(/<[^>]+>/g, ' ').slice(0, 140)}</div>
         {n.error && <div class="error small">{n.error}</div>}
         <div class="row">
-          {canSend && n.status !== 'added' && <button class="button small" onClick={onSend}>Send</button>}
+          {canSend && n.status !== 'added' && <button class="button small" onClick={onSend} data-testid="note-send">Send</button>}
+          {n.status === 'added' && <button class="button small" onClick={onUnmark} title="Not in Anki any more: mark as not sent" data-testid="note-unmark">↺ Not in Anki</button>}
           {onView && <button class="button small" onClick={onView} title="View in Anki">📖</button>}
           <button class="button small danger" onClick={() => confirm('Delete?') && onDelete()} title="Delete">🗑</button>
         </div>

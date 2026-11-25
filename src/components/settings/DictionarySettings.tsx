@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
-import { dicts, refreshDicts, settings, showToast, updateSettings } from '../../store';
+import { useEffect, useRef } from 'preact/hooks';
+import { dictErrors, dictProgress, dicts, refreshDicts, settings, showToast, updateSettings } from '../../store';
 import { installDictionaries } from '../../lib/db';
 import { BUILTIN_JMDICT, BUILTIN_KANJIDIC } from '../../lib/settings';
 import { deleteDictionary, importYomitanDictionary } from '../../lib/yomitan/importer';
@@ -11,8 +11,11 @@ const KIND_LABEL: Record<string, string> = { terms: 'terms', freq: 'frequency', 
 
 export function DictionarySettings() {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [progress, setProgress] = useState<{ stage: string; done: number; total: number } | null>(null);
-  const [errors, setErrors] = useState<string[]>([]);
+  // Progress lives in the store: an import keeps running (and showing) when you leave this tab.
+  const progress = dictProgress.value;
+  const setProgress = (p: typeof dictProgress.value) => (dictProgress.value = p);
+  const errors = dictErrors.value;
+  const setErrors = (e: string[]) => (dictErrors.value = e);
   useEffect(() => { refreshDictionaries(); }, []);
 
   const builtin = dicts.value ?? {};

@@ -5,7 +5,8 @@ import { ankiMobileUrl, buildMarkerValues, isAndroid, sendToAnkiConnect, shareTo
 import { saveNote, tagDescriptions, type MinedNote } from './lib/db';
 import type { ImageMode } from './lib/settings';
 import { cropImage } from './scanActions';
-import { occurrenceFreqDicts } from './dictionaries';
+import { installedDictionaries, occurrenceFreqDicts } from './dictionaries';
+import { scopeDictionaryCss } from './lib/yomitan/render';
 import { scan, settings, type Scan } from './store';
 
 export interface MiningContext {
@@ -39,7 +40,9 @@ export function miningContext(s: Pick<Scan, 'text' | 'ruby'>, index: number, har
 }
 
 export async function markerValues(result: TermResult, ctx: { sentence: string; offset: number | null; ruby: MiningContext['ruby']; source: string }) {
-  return buildMarkerValues(result, { ...ctx, tags: await tagDescriptions(), occurrenceFreqDicts: occurrenceFreqDicts() });
+  // Dictionary styles travel with the definitions (scoped to their dictionary), as in Yomitan.
+  const styles = Object.fromEntries(installedDictionaries.value.filter((d) => d.styles).map((d) => [d.title, scopeDictionaryCss(d.styles!, d.title)]));
+  return buildMarkerValues(result, { ...ctx, tags: await tagDescriptions(), occurrenceFreqDicts: occurrenceFreqDicts(), styles });
 }
 
 export interface MineOutcome { note: MinedNote; sent: SendResult | null; error: string | null }

@@ -1,5 +1,5 @@
 import { localEngine, recognize, type Rect } from './lib/ocr/client';
-import { charCells, scan, settings, view, ocrState, showToast, textFromLines, trimLine, type Scan } from './store';
+import { charCells, opening, scan, settings, view, ocrState, showToast, textFromLines, trimLine, type Scan } from './store';
 import type { OcrLine, Orientation, Point } from './lib/ocr/types';
 import { processFurigana } from './lib/ocr/ruby';
 import { arrange, type LaidOutLine } from './lib/ocr/layout';
@@ -26,7 +26,7 @@ export function ensureOcrEngine(): Promise<void> {
       for (const f of files.values()) { loaded += f.loaded; total += f.total; }
       ocrState.value = { state: 'loading', loaded, total };
     })
-    .then((backend) => { ocrState.value = { state: 'ready', message: backend }; })
+    .then(() => { ocrState.value = { state: 'ready' }; })
     .catch((e) => {
       ocrState.value = { state: 'error', message: String(e?.message ?? e) };
       throw e;
@@ -259,10 +259,22 @@ const BASE = new URL(import.meta.env.BASE_URL, location.href).href;
 let pdf: { doc: PDFDocumentProxy; name: string } | null = null;
 
 export async function openPdfFile(file: Blob, name = 'PDF') {
-  const doc = await openPdf(await file.arrayBuffer(), BASE);
-  void pdf?.doc.cleanup();
-  pdf = { doc, name };
-  await showPdfPage(1);
+  page.session?.cancel();
+  if (scan.value?.url) URL.revokeObjectURL(scan.value.url);
+  scan.value = null;
+  opening.value = name;
+  view.value = 'scan';
+  try {
+    const doc = await openPdf(await file.arrayBuffer(), BASE);
+    void pdf?.doc.cleanup();
+    pdf = { doc, name };
+    await showPdfPage(1);
+  } catch (e) {
+    view.value = 'capture';
+    throw e;
+  } finally {
+    opening.value = null;
+  }
 }
 
 /** Shows page n of the open PDF: its own text when it has some, otherwise OCR. */
@@ -293,12 +305,24 @@ export async function showPdfPage(n: number) {
 export async function openImage(blob: Blob, source = '') {
   void pdf?.doc.cleanup();
   pdf = null;
-  const canvas = await toCanvas(blob);
-  const url = await canvasUrl(canvas);
+  // Go to the Read tab at once: decoding a camera photo takes a moment on a phone.
+  page.session?.cancel();
   if (scan.value?.url) URL.revokeObjectURL(scan.value.url);
-  scan.value = { canvas, url, lines: [], text: [], meta: [], lineOf: [], ruby: [], geom: [], pending: [], progress: null, sectionsEdited: false, areas: [], busy: false, error: null, source };
+  scan.value = null;
+  opening.value = source || 'photo';
   view.value = 'scan';
-  startAnalysis();
+  try {
+    const canvas = await toCanvas(blob);
+    // The photo itself is shown (no re-encoding); the canvas is what gets read.
+    const url = URL.createObjectURL(blob);
+    scan.value = { canvas, url, lines: [], text: [], meta: [], lineOf: [], ruby: [], geom: [], pending: [], progress: null, sectionsEdited: false, areas: [], busy: false, error: null, source };
+    startAnalysis();
+  } catch (e) {
+    view.value = 'capture';
+    throw e;
+  } finally {
+    opening.value = null;
+  }
 }
 
 export function openText(text: string, source = '') {

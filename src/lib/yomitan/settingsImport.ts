@@ -3,6 +3,7 @@
 // the TSV export alike), tags, duplicate handling, and dictionary order / enabled state.
 import type { DictionarySetting, DuplicateBehavior, Settings } from '../settings';
 import { MARKERS } from '../anki';
+import { knownNoteType, recommendedFields } from '../noteTypes';
 
 interface YomitanProfile { name?: string; options?: Record<string, unknown> }
 
@@ -43,13 +44,22 @@ export function applyYomitanProfile(s: Settings, profile: YomitanProfile, instal
     const formats = Array.isArray(anki.cardFormats) ? anki.cardFormats : [];
     const term = formats.find((f: any) => f?.type === 'term' && f.model) ?? formats.find((f: any) => f?.type === 'term') ?? anki.terms;
     if (term && (term.deck || term.model)) {
-      const fields: Record<string, string> = {};
+      let fields: Record<string, string> = {};
       for (const [name, v] of Object.entries(term.fields ?? {})) {
         fields[name] = typeof v === 'string' ? v : typeof (v as any)?.value === 'string' ? (v as any).value : '';
+      }
+      // JP Mining Note is meant to be used with its own Yomitan templates ({jpmn-…} markers). A
+      // profile without them (default templates) gives plain cards, so its recommended fields are
+      // used instead; this app implements those markers itself.
+      const known = knownNoteType(Object.keys(fields));
+      if (known?.name === 'JP Mining Note' && !Object.values(fields).some((t) => t.includes('{jpmn-'))) {
+        fields = recommendedFields(Object.keys(fields));
+        notes.push('JP Mining Note: its recommended fields are used (this Yomitan profile has no JPMN templates)');
       }
       // The same note type for every way of sending cards: AnkiConnect, AnkiMobile and the TSV export.
       const deck = term.deck ?? '', model = term.model ?? '';
       Object.assign(s.anki, { deck, model, fields: { ...fields } });
+      s.anki.savedFields = { ...s.anki.savedFields, [model]: { ...fields } };
       Object.assign(s.anki.mobile, { deck, model, fields: { ...fields } });
       s.anki.export = { ...s.anki.export, deck, model, fields: { ...fields }, notetype: s.anki.export.notetype?.name === model ? s.anki.export.notetype : null };
       notes.push(`Anki: deck “${deck}”, note type “${model}”, ${Object.keys(fields).length} fields`);

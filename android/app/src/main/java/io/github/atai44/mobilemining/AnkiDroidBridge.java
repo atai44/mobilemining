@@ -110,6 +110,13 @@ public class AnkiDroidBridge {
         return id;
     }
 
+    /** The ids among these that still exist in AnkiDroid (cards deleted there are left out). */
+    public List<Long> existing(List<Long> ids) {
+        List<Long> out = new ArrayList<>();
+        for (Long id : ids) if (noteFields(id) != null) out.add(id);
+        return out;
+    }
+
     /** Field values of a note, in the note type's field order (null when the note doesn't exist). */
     public String[] noteFields(long id) {
         NoteInfo note = api.getNote(id);

@@ -89,6 +89,8 @@ describe('findTerms', () => {
     expect(r[0].expression).toBe('食べる');
     expect(r[0].length).toBe(6);
     expect(r[0].reasons).toEqual(['negative', 'past']);
+    // Each dictionary entry's definitions appear once (they used to be doubled on cards)
+    expect(r[0].definitions.length).toBe(1);
   });
   it('prefers longer compounds', async () => {
     const r = await findTerms(chars('食べ物が好き'), 0, lookup);

@@ -179,7 +179,8 @@ export async function findTerms(text: string[], start: number, sources: KeyLooku
       const r = buildResult(e, c.term, source, c.length, c.reasons);
       if (!r) continue;
       const key = r.expression + '\u0000' + r.reading;
-      const g = touch(key, () => ({ ...r, key, defIds: new Set() }), c, source, r.matchedKanji);
+      // The group starts without definitions: they are added below, once per dictionary entry.
+      const g = touch(key, () => ({ ...r, definitions: [], key, defIds: new Set() }), c, source, r.matchedKanji);
       const id = 'b' + e.id;
       if (!g.defIds.has(id)) {
         g.defIds.add(id);

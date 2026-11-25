@@ -68,6 +68,9 @@ public class AnkiDroidBridgeTest {
         long id = anki.addNote(model, deck, values, new HashSet<>(Arrays.asList("mobilemining", "test")));
         assertArrayEquals(new String[] { "読む", "よむ", "昨日は本を<b>読まなかった</b>。", values.get("Picture"), snd }, anki.noteFields(id));
 
+        // Still there? (a made-up id is not)
+        assertEquals(Arrays.asList(id), anki.existing(Arrays.asList(id, 1234567890123L)));
+
         // Duplicates, update
         List<Long> dupes = anki.findDuplicates(model, "読む");
         assertEquals(Arrays.asList(id), dupes);

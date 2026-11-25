@@ -7,6 +7,7 @@ import { applyYomitanProfile, parseYomitanSettings, type ImportSummary, type Yom
 import { installedDictionaries, refreshDictionaries } from '../../dictionaries';
 import { Toggle } from '../ui';
 import { isNative } from '../../lib/native';
+import { knownNoteType, recommendedFields } from '../../lib/noteTypes';
 
 type Conn = { state: 'idle' | 'checking' | 'ok' | 'error'; message?: string };
 
@@ -20,7 +21,6 @@ export function AnkiSettings() {
   const [decks, setDecks] = useState<string[]>([]);
   const [models, setModels] = useState<string[]>([]);
   const [conn, setConn] = useState<Conn>({ state: 'idle' });
-  const [busy, setBusy] = useState(false);
 
   const connect = async (interactive: boolean) => {
     setConn({ state: 'checking' });
@@ -45,31 +45,20 @@ export function AnkiSettings() {
   // Check the connection whenever AnkiConnect is selected (like Yomitan's status indicator).
   useEffect(() => { if (api) connect(false); }, [a.method, a.url, a.key]);
 
-  const loadFields = async (model: string, preset?: Record<string, string>) => {
+  /**
+   * Switches to a note type. Each note type keeps its own mapping; a note type seen for the first
+   * time starts from its recommended mapping (JP Mining Note, Lapis) or cautious guesses.
+   */
+  const loadFields = async (model: string, reset = false) => {
     const names = await client(settings.value).modelFieldNames(model);
     updateSettings((s) => {
-      const prev = s.anki.model === model ? s.anki.fields : {};
+      if (s.anki.model && Object.keys(s.anki.fields).length) s.anki.savedFields[s.anki.model] = s.anki.fields;
+      const saved = reset ? undefined : s.anki.model === model ? s.anki.fields : s.anki.savedFields[model];
+      const rec = recommendedFields(names);
       s.anki.model = model;
-      s.anki.fields = Object.fromEntries(names.map((n) => [n, preset?.[n] ?? prev[n] ?? guessMarker(n)]));
+      s.anki.fields = Object.fromEntries(names.map((n) => [n, saved?.[n] ?? rec[n]]));
+      s.anki.savedFields[model] = s.anki.fields;
     });
-  };
-
-  const setupForMe = async () => {
-    setBusy(true);
-    try {
-      const c = client(settings.value);
-      const model = await createMobileMiningModel(settings.value);
-      const deck = settings.value.anki.deck || 'Mining';
-      if (!(await c.deckNames()).includes(deck)) await c.createDeck(deck);
-      updateSettings((s) => (s.anki.deck = deck));
-      await loadFields(model, MM_FIELDS);
-      await connect(false);
-      showToast(`Ready: deck “${deck}”, note type “${MM_MODEL}”`, 'ok');
-    } catch (e) {
-      showToast(String((e as Error).message ?? e), 'error');
-    } finally {
-      setBusy(false);
-    }
   };
 
   const newDeck = async () => {
@@ -137,12 +126,6 @@ export function AnkiSettings() {
             </label>
           </details>
 
-          {conn.state === 'ok' && (
-            <div class="setup-box">
-              <button class="button" onClick={setupForMe} disabled={busy} title="Sentence card: word, audio, pitch, meaning, photo" data-testid="anki-setup">{busy ? '…' : `Create “${MM_MODEL}” note type`}</button>
-            </div>
-          )}
-
           <label class="field">
             <span>Deck</span>
             <div class="row">
@@ -168,7 +151,8 @@ export function AnkiSettings() {
               <input value={a.model} placeholder="Note type" onChange={(e) => updateSettings((s) => (s.anki.model = (e.target as HTMLInputElement).value))} />
             )}
           </label>
-          <FieldMapping fields={a.fields} extraMarkers={dynamicMarkers} onChange={(f, v) => updateSettings((s) => (s.anki.fields[f] = v))} />
+          <FieldMapping fields={a.fields} extraMarkers={dynamicMarkers} onChange={(f, v) => updateSettings((s) => (s.anki.fields[f] = v))}
+            onReset={a.model ? () => loadFields(a.model, true).catch((err) => showToast(String(err.message), 'error')) : undefined} />
 
           <div class="field">
             <span>Duplicates</span>
@@ -251,7 +235,9 @@ function ExportSettings({ markers }: { markers: { name: string; description: str
       const prev = s.anki.export.fields;
       s.anki.export.notetype = nt;
       s.anki.export.model = nt.name;
-      s.anki.export.fields = Object.fromEntries([...nt.fields].sort((x, y) => x.ord - y.ord).map((f) => [f.name, prev[f.name] ?? guessMarker(f.name)]));
+      const names = [...nt.fields].sort((x, y) => x.ord - y.ord).map((f) => f.name);
+      const rec = recommendedFields(names);
+      s.anki.export.fields = Object.fromEntries(names.map((n) => [n, prev[n] ?? rec[n]]));
     });
     setChoices(null);
     showToast(nt.name, 'ok');
@@ -262,8 +248,8 @@ function ExportSettings({ markers }: { markers: { name: string; description: str
       const all = await readNotetypes(await f.arrayBuffer());
       const used = all.filter((x) => x.notes > 0);
       const list = used.length ? used : all;
-      const preferred = list.find((x) => x.notetype.name === ex.model);
-      if (preferred || list.length === 1) use((preferred ?? list[0]).notetype);
+      // One note type: take it. Several: always ask (so another one can be picked from the same file).
+      if (list.length === 1) use(list[0].notetype);
       else setChoices(list);
     } catch (e) {
       showToast(String((e as Error).message ?? e), 'error');
@@ -405,8 +391,10 @@ function YomitanImport() {
   );
 }
 
-function FieldMapping({ fields, onChange, editableNames, onRename, onAdd, extraMarkers = [] }: {
+function FieldMapping({ fields, onChange, editableNames, onRename, onAdd, onReset, extraMarkers = [] }: {
   fields: Record<string, string>;
+  /** Back to the recommended mapping for this note type. */
+  onReset?: () => void;
   onChange: (field: string, value: string) => void;
   editableNames?: boolean;
   onRename?: (from: string, to: string) => void;
@@ -417,7 +405,12 @@ function FieldMapping({ fields, onChange, editableNames, onRename, onAdd, extraM
   const all = [...MARKERS, ...extraMarkers];
   return (
     <div class="field">
-      <span>Fields</span>
+      <span class="row space">
+        Fields
+        {onReset && entries.length > 0 && (
+          <button class="button link small" onClick={onReset} data-testid="fields-reset">{knownNoteType(entries.map(([f]) => f)) ? `Recommended for ${knownNoteType(entries.map(([f]) => f))!.name}` : 'Reset'}</button>
+        )}
+      </span>
       <datalist id="markers">
         {all.map((m) => <option key={m.name} value={`{${m.name}}`}>{m.description}</option>)}
         <option value="{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}">Sentence with the word in bold</option>

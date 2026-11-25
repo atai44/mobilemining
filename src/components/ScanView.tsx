@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { signal } from '@preact/signals';
-import { scan, settings, updateSettings, view, showToast, ocrState, locate, indexOf } from '../store';
+import { scan, opening, settings, updateSettings, view, showToast, ocrState, locate, indexOf } from '../store';
 import {
   runOcr, rotateScan, startAnalysis, focusAt, setEditedText, showPdfPage,
   mergeSections, moveSection, deleteSection, redirectSection, resetSections,
@@ -34,6 +34,14 @@ export function ScanView() {
   useEffect(() => setPopup(null), [s?.url, mode]);
 
   if (!s) {
+    if (opening.value !== null) {
+      return (
+        <div class="page center" data-testid="opening">
+          <div class="spinner" />
+          <p class="muted">Opening…</p>
+        </div>
+      );
+    }
     return (
       <div class="page center">
         <p>No page yet.</p>
@@ -144,6 +152,9 @@ function outset(q: Point[]): Point[] {
     { x: q[2].x + u.x + v.x, y: q[2].y + u.y + v.y }, { x: q[3].x - u.x + v.x, y: q[3].y - u.y + v.y },
   ];
 }
+
+/** Letters and digits (not punctuation or symbols): only these are marked when the OCR was unsure. */
+const WORD_CHAR = /[\p{L}\p{N}]/u;
 
 const SECTION_COLORS = ['#e8590c', '#1c7ed6', '#2f9e44', '#ae3ec9', '#f08c00', '#0c8599', '#d6336c', '#5c940d'];
 
@@ -348,7 +359,7 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
   };
 
   const cells = useMemo(
-    () => s.geom.map((g, i) => (g ? { i, points: `${g[0]},${g[1]} ${g[2]},${g[3]} ${g[4]},${g[5]} ${g[6]},${g[7]}`, low: lowConf && (s.meta[i]?.p ?? 1) < 0.7 } : null)).filter(Boolean) as { i: number; points: string; low: boolean }[],
+    () => s.geom.map((g, i) => (g ? { i, points: `${g[0]},${g[1]} ${g[2]},${g[3]} ${g[4]},${g[5]} ${g[6]},${g[7]}`, low: lowConf && (s.meta[i]?.p ?? 1) < 0.7 && WORD_CHAR.test(s.text[i] ?? '') } : null)).filter(Boolean) as { i: number; points: string; low: boolean }[],
     [s.geom, s.meta, lowConf],
   );
   const edited = !!s.lines.length && !cells.length;
@@ -365,7 +376,6 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
         <button class={`button small ${sections ? 'primary' : ''}`} onClick={() => { setDraw(null); setSections(!sections); }} title="Sections" data-testid="sections">
           § Sections
         </button>
-        <button class="button small" onClick={() => startAnalysis()} title="Re-read">↻</button>
         <button class="button small" onClick={() => rotateScan()} title="Rotate 90°">⟳</button>
         <select class="small" value={orientation} onChange={(e) => setOrientation((e.target as HTMLSelectElement).value as Orientation)} title="Text direction">
           <option value="auto">Auto</option>
@@ -386,7 +396,7 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
         <button class="button small" onClick={onShowText} title="Text" data-testid="show-text">Aa</button>
       </div>
       <ProgressBar />
-      {edited && <div class="banner small">Edited text · ↻ to re-read</div>}
+      {edited && <button class="banner small" onClick={() => startAnalysis()} data-testid="reread">Edited text · tap to read the photo again</button>}
       <div
         class={`image-scroll ${selecting ? 'selecting' : ''}`}
         ref={scrollRef}
@@ -792,7 +802,7 @@ function TextPanel({ highlight, onTap, onShowImage }: {
             <p class={`line ${ln.chars.length ? '' : 'blank'}`} key={ln.start}>
               {renderLine(ln.start, ln.chars.length, (i) => {
                 const m = s.meta[i];
-                const low = d.highlightLowConfidence && m && m.p < 0.7;
+                const low = d.highlightLowConfidence && m && m.p < 0.7 && WORD_CHAR.test(s.text[i]);
                 const inHl = highlight && i >= highlight.start && i < highlight.end;
                 return (
                   <span key={i} data-i={i} class={`${low ? 'low' : ''}${inHl ? ' hl' : ''}`}>
