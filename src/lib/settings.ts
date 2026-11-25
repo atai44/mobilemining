@@ -1,4 +1,5 @@
 import type { AnkiNotetype } from './apkg';
+import { isNative } from './native';
 import type { Orientation } from './ocr/types';
 
 export type AnkiMethod = 'ankiconnect' | 'ankimobile' | 'ankidroid' | 'local';
@@ -128,7 +129,10 @@ export function loadSettings(): Settings {
       return merge(DEFAULT_SETTINGS, parsed);
     }
   } catch { /* ignore */ }
-  return structuredClone(DEFAULT_SETTINGS);
+  const fresh = structuredClone(DEFAULT_SETTINGS);
+  // The Android app adds straight to AnkiDroid by default.
+  if (isNative()) fresh.anki.method = 'ankidroid';
+  return fresh;
 }
 
 export function saveSettings(s: Settings) {

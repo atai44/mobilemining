@@ -42,6 +42,27 @@ jobs:
         env:
           DICT_REFRESH: ${{ steps.sources.outputs.cache-hit != 'true' && '1' || '0' }}
       - run: npm run build
+      # Android app: the same build wrapped with Capacitor (android/), plus the AnkiDroid plugin.
+      # Published on the site as mobilemining.apk and as a GitHub Release. A failure here doesn't
+      # block the site.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Build Android app
+        id: apk
+        continue-on-error: true
+        run: |
+          npx cap sync android
+          cd android
+          ./gradlew --no-daemon assembleRelease -PmmVersionCode=${{ github.run_number }} -PmmVersionName=1.0.${{ github.run_number }}
+          cp app/build/outputs/apk/release/app-release.apk ../dist/mobilemining.apk
+          ls -la ../dist/mobilemining.apk
+      - uses: actions/upload-artifact@v4
+        if: steps.apk.outcome == 'success'
+        with:
+          name: apk
+          path: dist/mobilemining.apk
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
@@ -55,3 +76,22 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # The APK as a GitHub Release (for Obtainium and direct downloads)
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+      - run: >
+          gh release create "v1.0.${{ github.run_number }}" mobilemining.apk
+          --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA"
+          --title "MobileMining for Android 1.0.${{ github.run_number }}"
+          --notes "Install mobilemining.apk on Android (AnkiDroid must be installed first). Built from ${GITHUB_SHA::7}."
+        env:
+          GH_TOKEN: ${{ github.token }}

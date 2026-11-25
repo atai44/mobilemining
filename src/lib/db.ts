@@ -101,8 +101,10 @@ export async function dictStatus(): Promise<DictStatus> {
 export type InstallProgress = (stage: string, done: number, total: number) => void;
 
 async function download(url: string, label: string, onProgress: InstallProgress): Promise<Uint8Array> {
-  const res = await fetch(url, { cache: 'no-cache' });
-  if (!res.ok || !res.body) throw new Error(`Download failed: ${url} (HTTP ${res.status})`);
+  let res = await fetch(url, { cache: 'no-cache' }).catch(() => null);
+  // Android's packager unpacks .gz files in the app and drops the extension.
+  if (!res?.ok && url.endsWith('.gz')) res = await fetch(url.slice(0, -3), { cache: 'no-cache' }).catch(() => null);
+  if (!res?.ok || !res.body) throw new Error(`Download failed: ${url}${res ? ` (HTTP ${res.status})` : ''}`);
   const total = Number(res.headers.get('content-length')) || 0;
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];

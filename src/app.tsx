@@ -1,6 +1,7 @@
 import { useEffect } from 'preact/hooks';
 import { view, toast, refreshDicts, scan, type View } from './store';
 import { refreshDictionaries } from './dictionaries';
+import { isNative } from './lib/native';
 import { CaptureView } from './components/CaptureView';
 import { ScanView } from './components/ScanView';
 import { NotesView } from './components/NotesView';
@@ -19,6 +20,16 @@ export function App() {
     refreshDictionaries().catch((e) => console.error(e));
     // Persisted storage keeps the dictionary from being evicted on mobile browsers.
     navigator.storage?.persist?.().catch(() => {});
+    // Android app: the back button goes back to the capture screen, then leaves the app.
+    if (!isNative()) return;
+    let remove: (() => void) | undefined;
+    import('@capacitor/app').then(({ App: NativeApp }) =>
+      NativeApp.addListener('backButton', () => {
+        if (view.value !== 'capture') view.value = view.value === 'scan' || !scan.value ? 'capture' : 'scan';
+        else NativeApp.minimizeApp();
+      }).then((h) => { remove = () => h.remove(); }),
+    );
+    return () => remove?.();
   }, []);
 
   const v = view.value;

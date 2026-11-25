@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { deleteNote, listNotes, saveNote, type MinedNote } from '../lib/db';
-import { MM_FIELDS, notesToTsv, sendToAnkiConnect, viewNote } from '../lib/anki';
+import { MM_FIELDS, notesToTsv, sendToAnkiConnect, usesApi, viewNote } from '../lib/anki';
+import { saveFile } from '../lib/native';
 import { settings, showToast } from '../store';
 
 export function NotesView() {
@@ -10,7 +11,7 @@ export function NotesView() {
   useEffect(() => { reload(); }, []);
 
   const st = settings.value;
-  const canSend = st.anki.method === 'ankiconnect';
+  const canSend = usesApi(st);
 
   const send = async (n: MinedNote) => {
     try {
@@ -49,7 +50,7 @@ export function NotesView() {
       if (navigator.canShare?.({ files: [file] })) {
         try { await navigator.share({ files: [file] }); shared = true; } catch (e) { if ((e as Error).name === 'AbortError') return; }
       }
-      if (!shared) download(file);
+      if (!shared) await saveFile(file, file.name);
       for (const n of pending) { n.status = 'added'; n.error = undefined; await saveNote(n); }
       showToast(`${res.notes} → ${file.name}`, 'ok');
     } catch (e) {
@@ -62,11 +63,7 @@ export function NotesView() {
 
   const exportTsv = () => {
     const blob = new Blob([notesToTsv(notes ?? [], st)], { type: 'text/tab-separated-values' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `mobilemining-${new Date().toISOString().slice(0, 10)}.txt`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    saveFile(blob, `mobilemining-${new Date().toISOString().slice(0, 10)}.txt`).catch((e) => showToast(String(e.message ?? e), 'error'));
   };
 
   if (!notes) return <div class="page" />;
@@ -119,12 +116,4 @@ function NoteItem({ n, canSend, onSend, onDelete, onView }: { n: MinedNote; canS
       </div>
     </li>
   );
-}
-
-function download(file: File) {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(file);
-  a.download = file.name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }

@@ -705,6 +705,72 @@ await shot('09-mined');
   db.close();
 }
 
+// 14. Android app (Capacitor): the web side against a mocked native bridge. "AnkiDroid" then means
+// its API: connect, list decks / note types, add notes with image and audio, duplicates.
+{
+  await context.addInitScript(() => {
+    window.androidBridge = { postMessage() {} };
+    const calls = (window.__native = []);
+    const state = { granted: false, notes: [] };
+    const impl = {
+      AnkiDroid: {
+        status: () => ({ installed: true, granted: state.granted }),
+        requestAccess: () => { state.granted = true; return { installed: true, granted: true }; },
+        decks: () => ({ names: ['Default', 'Mining'] }),
+        models: () => ({ names: ['Basic', 'Lapis'] }),
+        fields: ({ model }) => ({ names: model === 'Lapis' ? ['Expression', 'ExpressionFurigana', 'ExpressionReading', 'MainDefinition', 'Sentence', 'Picture', 'ExpressionAudio'] : ['Front', 'Back'] }),
+        addDeck: () => ({ id: '1' }),
+        addModel: () => ({ id: '2' }),
+        findDuplicates: ({ key }) => ({ ids: state.notes.filter((n) => n.fields.Expression === key).map((n) => n.id) }),
+        addMedia: (o) => ({ tag: o.kind === 'audio' ? `[sound:${o.name}_1.${o.ext}]` : `<img src="${o.name}_1.${o.ext}" />`, name: `${o.name}_1.${o.ext}` }),
+        addNote: (o) => { const id = String(1700000000000 + state.notes.length); state.notes.push({ id, ...o }); return { id }; },
+        updateNote: () => ({}),
+        open: () => ({}),
+      },
+      // 読む has a recording; everything else gets the "not available" clip (52,288 bytes)
+      CapacitorHttp: { get: ({ url }) => ({ status: 200, headers: {}, data: btoa('x'.repeat(decodeURIComponent(url).includes('読む') ? 3000 : 52288)) }) },
+    };
+    window.Capacitor = {
+      PluginHeaders: Object.entries(impl).map(([name, m]) => ({ name, methods: Object.keys(m).map((n) => ({ name: n, rtype: 'promise' })) })),
+      nativePromise: async (plugin, method, options) => { calls.push([plugin, method, options]); return impl[plugin][method](options ?? {}); },
+    };
+  });
+  await page.reload();
+  await tab('Settings');
+  const methods = await page.$$eval('[data-testid=anki-settings] .segmented >> nth=0 >> button', (b) => b.map((x) => x.textContent));
+  await page.click('.segmented >> text=AnkiDroid');
+  await page.waitForSelector('.conn-error');
+  await page.click('[data-testid=anki-connect]');
+  await page.waitForSelector('.conn-ok');
+  await page.selectOption('[data-testid=anki-deck]', 'Mining');
+  await page.selectOption('[data-testid=anki-model]', 'Lapis');
+  await page.waitForSelector('[data-field="ExpressionAudio"]');
+  const audioField = await page.$eval('[data-field="ExpressionAudio"]', (e) => e.value);
+  check(methods.join(',') === 'AnkiDroid,AnkiConnect,Export' && audioField === '{audio}', `app: AnkiDroid connects and lists note types (${methods.join(', ')}; audio field ${audioField})`);
+  await ocr('horizontal.png');
+  await tapChar('読');
+  await page.click('[data-testid=popup] [data-testid=mine-button] >> nth=0');
+  await page.waitForSelector('.toast-ok', { timeout: 20_000 });
+  const native = await page.evaluate(() => window.__native.map(([p, m, o]) => [p, m, o]));
+  const note = native.find(([, m]) => m === 'addNote')?.[2];
+  const media = native.filter(([, m]) => m === 'addMedia').map(([, , o]) => `${o.kind}:${o.ext}:${o.data.length > 100}`);
+  check(note?.model === 'Lapis' && note.deck === 'Mining' && note.fields.Expression === '読む' && note.fields.Sentence.includes('<b>読まなかった</b>')
+    && /^<img src="mobilemining_\d+_1\.jpg">$/.test(note.fields.Picture) && /^\[sound:mobilemining_よむ_読む_1\.mp3\]$/.test(note.fields.ExpressionAudio) && note.tags.length > 0,
+    `app: note added through AnkiDroid's API with picture and audio (${media.join(', ')}; ${note?.fields.Picture} ${note?.fields.ExpressionAudio})`);
+  await page.click('[data-testid=close-panel]');
+  await tapChar('読');
+  await page.waitForFunction(() => document.querySelector('[data-testid=popup] [data-testid=mine-button]')?.classList.contains('dupe'), null, { timeout: 10_000 }).catch(() => {});
+  check(await page.$eval('[data-testid=popup] [data-testid=mine-button]', (e) => e.classList.contains('dupe')), 'app: duplicates found through AnkiDroid');
+  // A word without a recording: no audio file is stored
+  await page.click('[data-testid=close-panel]');
+  await tapChar('本');
+  const before = await page.evaluate(() => window.__native.filter(([, m, o]) => m === 'addMedia' && o.kind === 'audio').length);
+  await page.click('[data-testid=popup] [data-testid=mine-button] >> nth=0');
+  await page.waitForFunction(() => window.__native.filter(([, m]) => m === 'addNote').length === 2, null, { timeout: 20_000 });
+  const after = await page.evaluate(() => [window.__native.filter(([, m, o]) => m === 'addMedia' && o.kind === 'audio').length, window.__native.filter(([, m]) => m === 'addNote').at(-1)[2].fields.ExpressionAudio]);
+  check(after[0] === before && after[1] === '', `app: the "not available" clip is not added as audio (${JSON.stringify(after)})`);
+}
+
 await browser.close();
 server.close();
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');

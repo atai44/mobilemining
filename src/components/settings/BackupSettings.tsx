@@ -4,6 +4,7 @@ import { createBackup, restoreBackup, storageStatus } from '../../lib/backup';
 import { completeSettings, saveSettings } from '../../lib/settings';
 import { refreshDictionaries } from '../../dictionaries';
 import { Toggle } from '../ui';
+import { saveFile } from '../../lib/native';
 
 function mb(n: number) {
   return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.max(0.1, n / 1e6).toFixed(1)} MB`;
@@ -28,11 +29,7 @@ export function BackupSettings() {
     setReport(null);
     try {
       const blob = await createBackup(settings.value, withDicts, (stage, done, total) => setProgress(`${stage}${total > 1 ? ` (${done + 1}/${total})` : ''}…`));
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `mobilemining-backup-${new Date().toISOString().slice(0, 10)}.zip`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      await saveFile(blob, `mobilemining-backup-${new Date().toISOString().slice(0, 10)}.zip`);
       showToast(mb(blob.size), 'ok');
     } catch (e) {
       showToast(String((e as Error).message ?? e), 'error');

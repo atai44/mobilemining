@@ -8,6 +8,7 @@ import { ankiFurigana, escapeHtml, furiganaSegments, rubyHtml, toHiragana } from
 import type { Definition, TermResult } from './lookup';
 import type { MinedNote } from './db';
 import type { Settings } from './settings';
+import { AnkiDroidClient, isNative } from './native';
 import { glossaryText, renderGlossaryItem } from './yomitan/render';
 import { getMedia } from './yomitan/query';
 import { downstepPosition, pitchCategory, pitchHtml } from './pitch';
@@ -307,12 +308,18 @@ export class AnkiConnect {
   findNotes(query: string) { return this.invoke<number[]>('findNotes', { query }); }
   storeMediaFile(filename: string, data: string) { return this.invoke<string>('storeMediaFile', { filename, data }); }
   addNote(note: unknown) { return this.invoke<number>('addNote', { note }); }
-  updateNoteFields(note: unknown) { return this.invoke<null>('updateNoteFields', { note }); }
+  updateNoteFields(note: unknown) { const { modelName: _m, ...n } = note as Record<string, unknown>; return this.invoke<null>('updateNoteFields', { note: n }); }
   guiBrowse(query: string) { return this.invoke<number[]>('guiBrowse', { query }); }
   guiEditNote(note: number) { return this.invoke<null>('guiEditNote', { note }); }
 }
 
-export const client = (s: Settings) => new AnkiConnect(s.anki.url, s.anki.key);
+/** In the Android app, "AnkiDroid" means its API: direct adds, like AnkiConnect. */
+export const usesDroidApi = (s: Settings) => s.anki.method === 'ankidroid' && isNative();
+/** Cards go straight into Anki (AnkiConnect, or AnkiDroid's API in the Android app). */
+export const usesApi = (s: Settings) => s.anki.method === 'ankiconnect' || usesDroidApi(s);
+
+export type AnkiClient = AnkiConnect | AnkiDroidClient;
+export const client = (s: Settings): AnkiClient => (usesDroidApi(s) ? new AnkiDroidClient() : new AnkiConnect(s.anki.url, s.anki.key));
 
 async function blobToBase64(blob: Blob): Promise<string> {
   const buf = new Uint8Array(await blob.arrayBuffer());
@@ -344,19 +351,21 @@ function quote(s: string): string {
 /** Notes that duplicate this one (same first field, same note type, within the duplicate scope). */
 export async function findDuplicates(settings: Settings, values: Record<string, string>): Promise<number[]> {
   const a = settings.anki;
-  if (a.method !== 'ankiconnect' || !a.model || !a.checkForDuplicates) return [];
+  if (!usesApi(settings) || !a.model || !a.checkForDuplicates) return [];
   const [firstField, tpl] = Object.entries(a.fields)[0] ?? [];
   if (!firstField) return [];
   const value = fillTemplate(tpl, { ...values, image: '', audio: '' }).replace(/<[^>]+>/g, '').trim();
   if (!value) return [];
+  const c = client(settings);
+  if (c instanceof AnkiDroidClient) return c.findDuplicateNotes(a.model, value);
   let query = `${quote('note:' + a.model)} ${quote(firstField + ':' + value)}`;
   if (a.duplicateScope === 'deck' && a.deck) query += ` ${quote('deck:' + a.deck)}`;
   if (a.duplicateScope === 'deck-root' && a.deck) query += ` ${quote('deck:' + a.deck.split('::')[0])}`;
-  return client(settings).findNotes(query);
+  return c.findNotes(query);
 }
 
 /** Uploads images referenced by dictionary glossaries (<img data-media-*>) and rewrites their src. */
-async function uploadGlossaryImages(c: AnkiConnect, html: string): Promise<string> {
+async function uploadGlossaryImages(c: AnkiClient, html: string): Promise<string> {
   const re = /<img [^>]*data-media-dict="([^"]*)" data-media-path="([^"]*)"[^>]*>/g;
   const matches = [...html.matchAll(re)];
   for (const m of matches) {
@@ -412,7 +421,7 @@ export async function sendToAnkiConnect(settings: Settings, note: MinedNote, for
     if (dupes.length) {
       if (behavior === 'prevent') throw new Error(`「${values.expression}」 is already in Anki.`);
       // overwrite: only replace fields that have a new non-empty value (Yomitan's "coalesce")
-      const update: Record<string, unknown> = { id: dupes[0], fields: Object.fromEntries(Object.entries(fields).filter(([, v]) => v)) };
+      const update: Record<string, unknown> = { id: dupes[0], modelName: a.model, fields: Object.fromEntries(Object.entries(fields).filter(([, v]) => v)) };
       if (audio) update.audio = audio;
       await c.updateNoteFields(update);
       return { noteId: dupes[0], action: 'updated' };

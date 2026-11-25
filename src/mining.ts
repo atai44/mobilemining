@@ -1,7 +1,7 @@
 // Creating cards from a lookup: sentence context (with photo furigana), marker values,
 // image, and sending according to the configured Anki method.
 import { extractSentence, type TermResult } from './lib/lookup';
-import { ankiMobileUrl, buildMarkerValues, isAndroid, sendToAnkiConnect, shareToAnkiDroid, type SendResult } from './lib/anki';
+import { ankiMobileUrl, buildMarkerValues, isAndroid, sendToAnkiConnect, shareToAnkiDroid, usesApi, type SendResult } from './lib/anki';
 import { saveNote, tagDescriptions, type MinedNote } from './lib/db';
 import type { ImageMode } from './lib/settings';
 import { cropImage } from './scanActions';
@@ -55,7 +55,7 @@ export async function mineTerm(
   const note: MinedNote = { created: Date.now(), fields: values, image: image ?? undefined, status: 'pending' };
   let sent: SendResult | null = null;
   let error: string | null = null;
-  if (st.anki.method === 'ankidroid') {
+  if (st.anki.method === 'ankidroid' && !usesApi(st)) {
     // Share first: the browser only allows it right after the tap.
     try {
       await shareToAnkiDroid(st, values);
@@ -73,7 +73,7 @@ export async function mineTerm(
   }
   note.id = await saveNote(note);
   if (error) return { note, sent, error };
-  if (st.anki.method === 'ankiconnect') {
+  if (usesApi(st)) {
     try {
       sent = await sendToAnkiConnect(st, note, force);
       note.status = 'added';

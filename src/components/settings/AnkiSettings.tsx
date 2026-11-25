@@ -1,17 +1,22 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { settings, showToast, updateSettings } from '../../store';
-import { client, createMobileMiningModel, isAndroid, isIOS, dictSlug, guessMarker, MARKERS, MM_FIELDS, MM_MODEL } from '../../lib/anki';
+import { client, createMobileMiningModel, isAndroid, isIOS, usesApi, usesDroidApi, dictSlug, guessMarker, MARKERS, MM_FIELDS, MM_MODEL } from '../../lib/anki';
 import type { AnkiMethod, DuplicateBehavior, ImageMode, Settings } from '../../lib/settings';
 import type { AnkiNotetype } from '../../lib/apkg';
 import { applyYomitanProfile, parseYomitanSettings, type ImportSummary, type YomitanSettingsFile } from '../../lib/yomitan/settingsImport';
 import { installedDictionaries, refreshDictionaries } from '../../dictionaries';
 import { Toggle } from '../ui';
+import { isNative } from '../../lib/native';
 
 type Conn = { state: 'idle' | 'checking' | 'ok' | 'error'; message?: string };
 
 export function AnkiSettings() {
   const st = settings.value;
   const a = st.anki;
+  const native = isNative();
+  /** The Android app talking to AnkiDroid directly. */
+  const droid = usesDroidApi(st);
+  const api = usesApi(st);
   const [decks, setDecks] = useState<string[]>([]);
   const [models, setModels] = useState<string[]>([]);
   const [conn, setConn] = useState<Conn>({ state: 'idle' });
@@ -23,13 +28,13 @@ export function AnkiSettings() {
       const c = client(settings.value);
       if (interactive) {
         const perm = await c.requestPermission().catch(() => null);
-        if (perm?.permission === 'denied') throw new Error('AnkiConnect denied access for this site.');
+        if (perm?.permission === 'denied') throw new Error(usesDroidApi(settings.value) ? 'Access to AnkiDroid was denied' : 'AnkiConnect denied access for this site.');
       }
       const v = await c.version();
       const [d, m] = await Promise.all([c.deckNames(), c.modelNames()]);
       setDecks(d);
       setModels(m);
-      setConn({ state: 'ok', message: `Connected · v${v}` });
+      setConn({ state: 'ok', message: usesDroidApi(settings.value) ? 'Connected' : `Connected · v${v}` });
       const cur = settings.value.anki;
       if (cur.model && m.includes(cur.model) && !Object.keys(cur.fields).length) await loadFields(cur.model);
     } catch (e) {
@@ -38,7 +43,7 @@ export function AnkiSettings() {
   };
 
   // Check the connection whenever AnkiConnect is selected (like Yomitan's status indicator).
-  useEffect(() => { if (a.method === 'ankiconnect') connect(false); }, [a.method, a.url, a.key]);
+  useEffect(() => { if (api) connect(false); }, [a.method, a.url, a.key]);
 
   const loadFields = async (model: string, preset?: Record<string, string>) => {
     const names = await client(settings.value).modelFieldNames(model);
@@ -90,18 +95,16 @@ export function AnkiSettings() {
       <div class="field">
         <span>Send via</span>
         <div class="segmented">
-          {([
-            ['ankiconnect', 'AnkiConnect'],
-            ['ankimobile', 'AnkiMobile'],
-            ['ankidroid', 'AnkiDroid'],
-            ['local', 'Export'],
-          ] as [AnkiMethod, string][]).map(([m, label]) => (
+          {((native
+            ? [['ankidroid', 'AnkiDroid'], ['ankiconnect', 'AnkiConnect'], ['local', 'Export']]
+            : [['ankiconnect', 'AnkiConnect'], ['ankimobile', 'AnkiMobile'], ['ankidroid', 'AnkiDroid'], ['local', 'Export']]
+          ) as [AnkiMethod, string][]).map(([m, label]) => (
             <button key={m} class={a.method === m ? 'active' : ''} onClick={() => updateSettings((s) => (s.anki.method = m))}>{label}</button>
           ))}
         </div>
       </div>
 
-      {a.method === 'ankiconnect' && (
+      {api && (
         <>
           <div class={`conn conn-${conn.state}`} data-testid="anki-status">
             <span class="dot" />
@@ -110,7 +113,8 @@ export function AnkiSettings() {
               {conn.state === 'ok' ? 'Refresh' : 'Connect'}
             </button>
           </div>
-          {conn.state === 'error' && (
+          {conn.state === 'error' && droid && <p class="muted small">Needs AnkiDroid installed and opened once. If Connect shows no prompt, reinstall this app (it must be installed after AnkiDroid).</p>}
+          {conn.state === 'error' && !droid && (
             <details class="small help" open>
               <summary>Help</summary>
               <ol>
@@ -120,7 +124,7 @@ export function AnkiSettings() {
               </ol>
             </details>
           )}
-          <details class="field">
+          <details class="field" hidden={droid}>
             <summary>Connection</summary>
             <label class="field">
               <span>AnkiConnect URL</span>
@@ -175,7 +179,7 @@ export function AnkiSettings() {
                   <option value="prevent">Don't add</option>
                   <option value="overwrite">Overwrite</option>
                 </select>
-                <select value={a.duplicateScope} onChange={(e) => updateSettings((s) => (s.anki.duplicateScope = (e.target as HTMLSelectElement).value as typeof a.duplicateScope))}>
+                <select hidden={droid} value={a.duplicateScope} onChange={(e) => updateSettings((s) => (s.anki.duplicateScope = (e.target as HTMLSelectElement).value as typeof a.duplicateScope))}>
                   <option value="collection">Collection</option>
                   <option value="deck">Deck</option>
                   <option value="deck-root">Root deck</option>
@@ -184,7 +188,7 @@ export function AnkiSettings() {
             )}
           </div>
           <Toggle label="One-tap add" checked={a.quickAdd} onChange={(v) => updateSettings((s) => (s.anki.quickAdd = v))} />
-          <label class="field">
+          <label class="field" hidden={droid}>
             <span>View note in</span>
             <select value={a.noteGuiMode} onChange={(e) => updateSettings((s) => (s.anki.noteGuiMode = (e.target as HTMLSelectElement).value as 'browse' | 'edit'))}>
               <option value="browse">Browser</option>
@@ -206,7 +210,7 @@ export function AnkiSettings() {
         </>
       )}
 
-      {a.method === 'ankidroid' && (
+      {a.method === 'ankidroid' && !droid && (
         <>
           {isIOS() && <p class="error small">AnkiDroid is Android only.</p>}
           <p class="muted small">Share → AnkiDroid fills the first two fields of its note editor (it keeps its last note type and deck). Text only. For every field, images and audio, use AnkiConnect Android.</p>

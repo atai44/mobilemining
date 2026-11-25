@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { dicts, ocrState, refreshDicts, scan, settings, showToast, view } from '../store';
 import { installDictionaries } from '../lib/db';
 import { ensureOcrEngine, openImage, openPdfFile, openText } from '../scanActions';
+import { isAndroid } from '../lib/anki';
+import { isNative } from '../lib/native';
 
 const BASE = new URL(import.meta.env.BASE_URL, location.href).href;
 
@@ -96,6 +98,9 @@ export function CaptureView() {
       )}
 
       <OcrCard />
+      {isAndroid() && !isNative() && (
+        <p class="center small"><a href="./mobilemining.apk" data-testid="apk-link">Android app ↓</a> <span class="muted">adds straight to AnkiDroid</span></p>
+      )}
     </div>
   );
 }

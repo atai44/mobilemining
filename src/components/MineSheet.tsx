@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { TermResult } from '../lib/lookup';
-import { fillTemplate, findDuplicates, viewNote } from '../lib/anki';
+import { fillTemplate, findDuplicates, usesApi, viewNote } from '../lib/anki';
 import type { ImageMode } from '../lib/settings';
 import { scan, settings, showToast } from '../store';
 import { defaultImage, markerValues, mineTerm, miningContext } from '../mining';
@@ -41,13 +41,14 @@ export function MineSheet({ req, onClose }: { req: MineRequest; onClose: () => v
   }, [sentence, source]);
 
   useEffect(() => {
-    if (!values || st.anki.method !== 'ankiconnect') return;
+    if (!values || !usesApi(st)) return;
     findDuplicates(st, values).then(setDupes).catch(() => setDupes([]));
   }, [values?.expression]);
 
   const r = req.result;
   const method = st.anki.method;
-  const actionLabel = method === 'ankiconnect' ? 'Add' : method === 'ankimobile' ? 'AnkiMobile' : method === 'ankidroid' ? 'AnkiDroid' : 'Save';
+  const api = usesApi(st);
+  const actionLabel = api ? 'Add' : method === 'ankimobile' ? 'AnkiMobile' : method === 'ankidroid' ? 'AnkiDroid' : 'Save';
 
   const submit = async (force?: 'new' | 'overwrite') => {
     if (!values) return;
@@ -65,7 +66,7 @@ export function MineSheet({ req, onClose }: { req: MineRequest; onClose: () => v
     }
   };
 
-  const fieldPreview = method === 'ankiconnect' ? st.anki.fields : method === 'ankimobile' ? st.anki.mobile.fields : method === 'ankidroid' ? st.anki.droid.fields : null;
+  const fieldPreview = api ? st.anki.fields : method === 'ankimobile' ? st.anki.mobile.fields : method === 'ankidroid' ? st.anki.droid.fields : null;
   const preview = (tpl: string) => {
     if (/\{(image|screenshot|clipboard-image)\}/.test(tpl)) return '🖼 image';
     if (tpl.includes('{audio}')) return '🔊 audio';
@@ -125,7 +126,7 @@ export function MineSheet({ req, onClose }: { req: MineRequest; onClose: () => v
             </table>
           </details>
         )}
-        {(method === 'ankimobile' || method === 'ankidroid') && image && <p class="muted small">Image kept in Mined only</p>}
+        {(method === 'ankimobile' || method === 'ankidroid') && !api && image && <p class="muted small">Image kept in Mined only</p>}
         {dupes.length > 0 && (
           <p class="small dupe-note">
             Already in Anki.{' '}
@@ -133,7 +134,7 @@ export function MineSheet({ req, onClose }: { req: MineRequest; onClose: () => v
           </p>
         )}
         <div class="row sheet-actions">
-          {dupes.length > 0 && method === 'ankiconnect' ? (
+          {dupes.length > 0 && api ? (
             <>
               <button class="button grow" onClick={() => submit('overwrite')} disabled={busy || !values} data-testid="mine-overwrite">Overwrite</button>
               <button class="button primary grow" onClick={() => submit('new')} disabled={busy || !values} data-testid="mine-submit">Add new</button>

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import type { Definition, TermResult } from '../lib/lookup';
 import { getKanji, tagDescriptions, type Kanji } from '../lib/db';
 import { furiganaSegments, isKanji } from '../lib/kana';
-import { audioUrl, findDuplicates, viewNote } from '../lib/anki';
+import { audioUrl, findDuplicates, usesApi, viewNote } from '../lib/anki';
 import { checkAudio, playAudio, type AudioStatus } from '../lib/audio';
 import { renderGlossaryItem } from '../lib/yomitan/render';
 import { dictionaryTags, lookupYKanji, resolveMediaImages } from '../lib/yomitan/query';
@@ -58,7 +58,7 @@ export function Popup({ docked, index, results: initialResults, anchor, onClose,
   // Duplicate check against Anki (like Yomitan's "already added" state).
   useEffect(() => {
     const st = settings.value;
-    if (nested || st.anki.method !== 'ankiconnect' || !st.anki.model || !st.anki.checkForDuplicates || !results.length) return;
+    if (nested || !usesApi(st) || !st.anki.model || !st.anki.checkForDuplicates || !results.length) return;
     let cancelled = false;
     const s = scan.value!;
     const ctx = miningContext(s, index, st.display.hardLineBreaks);
@@ -200,7 +200,7 @@ function EntryView({ r, tags, anki, onKanji, onAdd, onEdit, onView, canMine }: {
     return () => { live = false; };
   }, [url]);
   const segs = furiganaSegments(r.expression, r.reading);
-  const isAnki = st.anki.method === 'ankiconnect';
+  const isAnki = usesApi(st);
   const dupe = isAnki && (anki?.dupes.length ?? 0) > 0;
   const viewId = anki?.added ?? anki?.dupes[0];
   const behavior = st.anki.duplicateBehavior;
