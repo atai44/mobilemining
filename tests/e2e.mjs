@@ -123,7 +123,7 @@ async function ocr(fixture) {
   const t = Date.now();
   await page.setInputFiles('[data-testid=file-input]', join(root, 'tests/fixtures', fixture));
   await page.waitForSelector('[data-testid=image-reader]');
-  await page.waitForFunction(() => !document.querySelector('.busy-overlay') && document.querySelector('[data-testid=image-reader] .ch'), null, { timeout: 180_000 });
+  await page.waitForFunction(() => !document.querySelector('[data-testid=ocr-progress]') && document.querySelector('[data-testid=image-reader] .ch'), null, { timeout: 180_000 });
   await toText();
   const text = await readerText();
   console.log(`  ${fixture} OCR in ${((Date.now() - t) / 1000).toFixed(1)}s:\n    ${text.replace(/\n/g, '\n    ')}`);
@@ -232,6 +232,30 @@ for (const fx of ['dense-vertical.png', 'dense-vertical-tilt.png', 'dense-horizo
   check(got.length === denseRuby.length, `${fx}: dense furigana on the right line (${got.length}/${denseRuby.length}) ${denseRuby.filter((w) => !rts.includes(w)).join(' ')}`);
 }
 
+// Progressive reading: the photo shows immediately, and tapping an unread line reads it first
+{
+  await tab('Capture');
+  const t0 = Date.now();
+  await page.setInputFiles('[data-testid=file-input]', join(root, 'tests/fixtures/dense-vertical.png'));
+  await page.waitForSelector('[data-testid=image-reader] img');
+  const shownMs = Date.now() - t0;
+  await page.waitForSelector('polygon.pending');
+  const pt = await page.$$eval('polygon.pending', (els) => {
+    const r = els.map((e) => e.getBoundingClientRect()).filter((r) => r.height > r.width * 5).sort((a, b) => a.left - b.left)[0];
+    return { x: r.left + r.width / 2, y: r.top + r.height * 0.3 };
+  });
+  const t1 = Date.now();
+  await page.mouse.click(pt.x, pt.y);
+  await page.waitForSelector('[data-testid=popup] .entry', { timeout: 60_000 });
+  const stillReading = await page.$eval('[data-testid=ocr-progress]', (e) => e.innerText).catch(() => '');
+  console.log(`  photo shown after ${shownMs}ms; popup ${Date.now() - t1}ms after tapping an unread line (${stillReading.split('—')[0].trim() || 'finished'})`);
+  check(shownMs < 1500, 'photo is shown before OCR');
+  check(/Reading \d+\/\d+/.test(stillReading), 'tapped line was read before the rest of the page');
+  await shot('06b-progressive');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('[data-testid=ocr-progress]'), null, { timeout: 120_000 });
+}
+
 // Mixed text directions: horizontal heading/caption around a vertical body
 {
   const text = await ocr('mixed.png');
@@ -247,6 +271,38 @@ for (const fx of ['dense-vertical.png', 'dense-vertical-tilt.png', 'dense-horizo
   check(sent.replace(/\s/g, '') === '第一章猫の話', `heading sentence stays within its block: ${sent}`);
   await page.click('.sheet-head [aria-label=Close]');
   await shot('07-mixed');
+
+  // Section editing
+  await toImage();
+  await page.click('[data-testid=sections]');
+  const count = () => page.$$eval('g[data-section]', (e) => e.length);
+  const pickSection = (i, nth = 0) => page.locator(`g[data-section="${i}"] polygon[data-section-line]`).nth(nth).click({ force: true });
+  const flatText = async () => { await toText(); const t = (await readerText()).replace(/\s/g, ''); await toImage(); await page.click('[data-testid=sections]'); return t; };
+  const n0 = await count();
+  check(n0 === 4, `sections shown with reading order (${n0})`);
+  await shot('07b-sections');
+  await pickSection(3); // caption
+  for (let k = 0; k < 3; k++) await page.click('[data-testid=sec-earlier]');
+  check((await flatText()).startsWith('写真'), 'moving a section changes the reading order');
+  await pickSection(3); // the note box
+  await page.click('[data-testid=sec-delete]');
+  check((await count()) === 3 && !(await flatText()).includes('注：'), 'deleting a section removes its text');
+  await pickSection(1); // heading
+  await page.click('[data-testid=sec-merge]');
+  await pickSection(2); // body
+  check((await count()) === 2, 'merging two sections');
+  await pickSection(1, 3); // a body column inside the merged section
+  await page.click('[data-testid=sec-split]');
+  check((await count()) === 3, 'splitting a section at a line');
+  await page.click('[data-testid=sec-reset]');
+  const reset = await flatText();
+  check((await count()) === 4 && reset.startsWith('第一章') && reset.includes('注：'), 'reset restores automatic sections');
+  await pickSection(3);
+  await page.click('[data-testid=sec-vertical]');
+  await page.waitForFunction(() => !document.querySelector('[data-testid=ocr-progress]'), null, { timeout: 60_000 });
+  check((await count()) >= 4, 're-reading a section with a forced direction');
+  await page.click('[data-testid=sec-reset]');
+  await page.click('.section-bar >> text=Done');
 }
 
 for (const fx of ['ruby-vertical.png', 'ruby-horizontal.png']) {

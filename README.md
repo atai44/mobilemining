@@ -16,6 +16,12 @@ uploaded unless you turn on the optional cloud OCR engine. After the first load 
   - Every character keeps the model's runner-up guesses. Tap a misread character and pick the right one, or edit the text directly.
   - Drag a box to OCR a specific area (best for small text). Rotate, zoom, and force horizontal or vertical.
   - Optional **Google Cloud Vision** engine (your own API key) for even wider character coverage.
+- **No waiting**: the photo appears immediately. Lines are found in about a second and then read one by one in the
+  background, each becoming tappable as soon as it's read. Tapping a part that hasn't been read yet reads that part
+  first (its line, the lines next to it, and their furigana).
+- **Fix the sections**: § Sections shows how the page was split into sections and their reading order. You can
+  reorder, merge, split at a line, re-read a section as vertical or horizontal, delete junk (page numbers, stray
+  marks), or reset.
 - **Read on the photo itself**: scroll and pinch-zoom the photo (Ctrl/trackpad pinch on desktop) and tap any word
   where it's printed. The word is highlighted in place. A text view (Aa) is still there for copying and editing.
 - **Mixed text directions** on one page work: a vertical body with a horizontal heading or captions, speech bubbles,
@@ -93,6 +99,7 @@ npm run build && npm run e2e   # headless Chromium: dictionary install, OCR of h
 | `src/lib/anki.ts` | AnkiConnect / AnkiMobile / TSV, Yomitan-compatible field markers, duplicates |
 | `src/lib/yomitan/` | Yomitan dictionary import, structured-content rendering, settings import |
 | `src/lib/ocr/ruby.ts` | Furigana detection and attachment (works in each line's rotated frame, so tilted photos are fine) |
+| `src/lib/ocr/session.ts` | Progressive OCR: detect once, recognize line by line with tap priority |
 | `src/lib/ocr/layout.ts` | Blocks and reading order for pages that mix horizontal and vertical text |
 | `scripts/` | Model download and dictionary build |
 

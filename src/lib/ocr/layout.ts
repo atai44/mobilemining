@@ -66,21 +66,7 @@ export function layoutLines(lines: OcrLine[]): LaidOutLine[] {
   const pageVertical = vertChars > lines.reduce((s, l) => s + l.chars.length, 0) / 2;
 
   // Order lines inside each block: rows top→bottom (left→right within), columns right→left (top→bottom within)
-  const blocks = [...groups.values()].map((idx) => {
-    const v = lines[idx[0]].vertical;
-    const key = (i: number) => (v ? -(lines[i].box.x + lines[i].box.w / 2) : lines[i].box.y + lines[i].box.h / 2);
-    const sorted = [...idx].sort((a, b) => key(a) - key(b));
-    const rows: number[][] = [];
-    for (const i of sorted) {
-      const row = rows[rows.length - 1];
-      if (row && row.some((j) => { const fa = frame(lines[j]), fb = frame(lines[i]); return overlapRatio(fa.across[0], fa.across[1], fb.across[0], fb.across[1]) > 0.5; })) row.push(i);
-      else rows.push([i]);
-    }
-    for (const row of rows) row.sort((a, b) => (v ? lines[a].box.y - lines[b].box.y : lines[a].box.x - lines[b].box.x));
-    const b = idx.map((i) => boxOf(lines[i])).reduce((u, x) => ({ x0: Math.min(u.x0, x.x0), y0: Math.min(u.y0, x.y0), x1: Math.max(u.x1, x.x1), y1: Math.max(u.y1, x.y1) }));
-    return { rows, box: b, vertical: v };
-  });
-
+  const blocks = [...groups.values()].map((idx) => blockRows(lines, idx));
   // Order blocks: bands top→bottom; within a band right→left on vertical pages, else left→right.
   blocks.sort((a, b) => a.box.y0 - b.box.y0);
   const bands: (typeof blocks)[] = [];
@@ -92,20 +78,64 @@ export function layoutLines(lines: OcrLine[]): LaidOutLine[] {
   bands.sort((a, b) => Math.min(...a.map((x) => x.box.y0)) - Math.min(...b.map((x) => x.box.y0)));
   const ordered = bands.flatMap((bd) => bd.sort((a, b) => (pageVertical ? b.box.x1 - a.box.x1 : a.box.x0 - b.box.x0)));
 
+  return emit(lines, ordered.map((b) => b.rows));
+}
+
+/** Orders the lines of one block by its (majority) direction. */
+function blockRows(lines: OcrLine[], idx: number[]) {
+  const v = idx.filter((i) => lines[i].vertical).length * 2 >= idx.length;
+  const key = (i: number) => (v ? -(lines[i].box.x + lines[i].box.w / 2) : lines[i].box.y + lines[i].box.h / 2);
+  const sorted = [...idx].sort((a, b) => key(a) - key(b));
+  const rows: number[][] = [];
+  const across = (i: number) => (v ? [lines[i].box.x, lines[i].box.x + lines[i].box.w] : [lines[i].box.y, lines[i].box.y + lines[i].box.h]);
+  for (const i of sorted) {
+    const row = rows[rows.length - 1];
+    if (row && row.some((j) => { const a = across(j), b = across(i); return overlapRatio(a[0], a[1], b[0], b[1]) > 0.5; })) row.push(i);
+    else rows.push([i]);
+  }
+  for (const row of rows) row.sort((a, b) => (v ? lines[a].box.y - lines[b].box.y : lines[a].box.x - lines[b].box.x));
+  const b = idx.map((i) => boxOf(lines[i])).reduce((u, x) => ({ x0: Math.min(u.x0, x.x0), y0: Math.min(u.y0, x.y0), x1: Math.max(u.x1, x.x1), y1: Math.max(u.y1, x.y1) }));
+  return { rows, box: b, vertical: v };
+}
+
+/** Flattens ordered blocks into lines with separators. */
+function emit(lines: OcrLine[], blocks: number[][][], firstBlock = 0, startHard = false): LaidOutLine[] {
   const out: LaidOutLine[] = [];
-  ordered.forEach((blk, bi) => {
-    blk.rows.forEach((row, ri) => {
+  blocks.forEach((rows, bi) => {
+    rows.forEach((row, ri) => {
       row.forEach((i, k) => {
         let sep: Sep = '\n';
-        if (out.length === 0) sep = '';
+        if (out.length === 0) sep = startHard ? '\n\n' : '';
         else if (ri === 0 && k === 0) sep = '\n\n';
         else if (k > 0) {
-          const gap = continues(lines[row[k - 1]], lines[i]);
-          sep = gap !== null && gap > thick(lines[i]) * 0.45 ? ' ' : '';
+          const a = lines[row[k - 1]], b = lines[i];
+          const gap = a.vertical === b.vertical ? continues(a, b) : null;
+          sep = gap !== null && gap > thick(b) * 0.45 ? ' ' : '';
         }
-        out.push({ ...lines[i], sep, block: bi });
+        out.push({ ...lines[i], sep, block: firstBlock + bi });
       });
     });
   });
   return out;
+}
+
+/**
+ * Layout with user-edited sections: `sections` lists line keys per section in reading order.
+ * Lines not covered by any section (e.g. read later) are laid out automatically after them.
+ */
+export function arrange(lines: OcrLine[], sections: string[][] | null): LaidOutLine[] {
+  if (!sections) return layoutLines(lines);
+  const index = new Map(lines.map((l, i) => [l.key, i]));
+  const used = new Set<number>();
+  const blocks: number[][][] = [];
+  for (const g of sections) {
+    const idx = g.map((k) => index.get(k)).filter((i): i is number => i !== undefined && !used.has(i));
+    if (!idx.length) continue;
+    idx.forEach((i) => used.add(i));
+    blocks.push(blockRows(lines, idx).rows);
+  }
+  const head = emit(lines, blocks);
+  const rest = lines.filter((_, i) => !used.has(i));
+  const tail = layoutLines(rest).map((l, k) => ({ ...l, block: l.block + blocks.length, sep: k === 0 && head.length ? ('\n\n' as Sep) : l.sep }));
+  return [...head, ...tail];
 }

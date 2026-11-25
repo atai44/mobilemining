@@ -11,6 +11,7 @@ import { BUILTIN_KANJIDIC } from '../lib/settings';
 import { enabledDictionaries, lookupAt } from '../dictionaries';
 import { markerValues, miningContext, quickMine } from '../mining';
 import { scan, settings, showToast } from '../store';
+import { correctChar } from '../scanActions';
 
 interface Props {
   index: number;
@@ -105,11 +106,7 @@ export function Popup({ index, results: initialResults, anchor, onClose, onReloo
   const tapped = s.text[index];
 
   const replaceChar = (c: string) => {
-    const text = [...s.text];
-    const metaArr = [...s.meta];
-    text[index] = c;
-    metaArr[index] = meta ? { c, p: 1, alts: [{ c: meta.c, p: meta.p }, ...(meta.alts ?? []).filter((a) => a.c !== c)] } : null;
-    scan.value = { ...s, text, meta: metaArr };
+    correctChar(index, c);
     onRelookup();
   };
 

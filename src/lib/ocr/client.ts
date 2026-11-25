@@ -1,4 +1,4 @@
-import type { OcrLine, OcrOptions, Point, RGBAImage, WorkerRequest, WorkerResponse } from './types';
+import type { LineGeomMsg, OcrLine, OcrOptions, Point, RGBAImage, WorkerRequest, WorkerResponse } from './types';
 import { sortLines, quadBox } from './pipeline';
 
 export interface Rect { x: number; y: number; w: number; h: number }
@@ -25,11 +25,13 @@ export function rasterize(source: CanvasImageSource, rect: Rect, outW: number, o
   return { data: img.data, width: outW, height: outH };
 }
 
+type Pending = { resolve: (m: WorkerResponse) => void; reject: (e: Error) => void };
+
 class LocalEngine {
   private worker: Worker | null = null;
   private ready: Promise<string> | null = null;
   private nextId = 1;
-  private pending = new Map<number, { resolve: (r: { lines: OcrLine[]; ms: { det: number; rec: number } }) => void; reject: (e: Error) => void }>();
+  private pending = new Map<number, Pending>();
   private progress: Progress | null = null;
 
   init(onProgress?: Progress): Promise<string> {
@@ -42,26 +44,40 @@ class LocalEngine {
         if (m.type === 'progress') this.progress?.(m);
         else if (m.type === 'ready') resolve(m.backend);
         else if (m.type === 'error' && m.id === undefined) { this.ready = null; reject(new Error(m.message)); }
-        else if (m.type === 'error' && m.id !== undefined) { this.pending.get(m.id)?.reject(new Error(m.message)); this.pending.delete(m.id); }
-        else if (m.type === 'result') { this.pending.get(m.id)?.resolve(m); this.pending.delete(m.id); }
+        else if (m.type === 'error') { this.pending.get(m.id!)?.reject(new Error(m.message)); this.pending.delete(m.id!); }
+        else if ('id' in m) { this.pending.get(m.id)?.resolve(m); this.pending.delete(m.id); }
       };
       this.worker!.onerror = (e) => { this.ready = null; reject(new Error(e.message || 'OCR worker failed to start')); };
     });
-    this.post({ type: 'init', base: BASE });
+    this.worker.postMessage({ type: 'init', base: BASE } satisfies WorkerRequest);
     return this.ready;
   }
 
-  private post(msg: WorkerRequest, transfer: Transferable[] = []) {
-    this.worker!.postMessage(msg, transfer);
+  private async request<T extends WorkerResponse>(msg: WorkerRequest & { id: number }, transfer: Transferable[] = []): Promise<T> {
+    await this.init();
+    return new Promise<T>((resolve, reject) => {
+      this.pending.set(msg.id, { resolve: resolve as (m: WorkerResponse) => void, reject });
+      this.worker!.postMessage(msg, transfer);
+    });
   }
 
   async run(det: RGBAImage, src: RGBAImage, opts: OcrOptions) {
-    await this.init();
-    const id = this.nextId++;
-    return new Promise<{ lines: OcrLine[]; ms: { det: number; rec: number } }>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.post({ type: 'run', id, det, src, opts }, [det.data.buffer, src.data.buffer]);
-    });
+    const m = await this.request<Extract<WorkerResponse, { type: 'result' }>>({ type: 'run', id: this.nextId++, det, src, opts }, [det.data.buffer, src.data.buffer]);
+    return { lines: m.lines, ms: m.ms };
+  }
+
+  async setImage(imageId: number, src: RGBAImage) {
+    await this.request({ type: 'image', id: this.nextId++, imageId, src }, [src.data.buffer]);
+  }
+
+  async detect(imageId: number, det: RGBAImage, opts: OcrOptions): Promise<LineGeomMsg[]> {
+    const m = await this.request<Extract<WorkerResponse, { type: 'detected' }>>({ type: 'detect', id: this.nextId++, imageId, det, opts }, [det.data.buffer]);
+    return m.geoms;
+  }
+
+  async rec(imageId: number, geoms: LineGeomMsg[]): Promise<(OcrLine | null)[]> {
+    const m = await this.request<Extract<WorkerResponse, { type: 'recognized' }>>({ type: 'rec', id: this.nextId++, imageId, geoms });
+    return m.lines;
   }
 }
 

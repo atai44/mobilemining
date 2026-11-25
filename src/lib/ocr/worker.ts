@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import * as ort from 'onnxruntime-web/wasm';
-import { runOcr, type Tensor } from './pipeline';
-import type { WorkerRequest, WorkerResponse } from './types';
+import { detectLines, recognizeLine, runOcr, type Tensor } from './pipeline';
+import type { RGBAImage, WorkerRequest, WorkerResponse } from './types';
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -56,6 +56,16 @@ function runner(session: () => ort.InferenceSession) {
   };
 }
 
+// Model runs are serialized: ONNX Runtime sessions can't run concurrently, and serial order lets
+// the main thread re-prioritize between lines.
+let chain: Promise<unknown> = Promise.resolve();
+const serial = <T>(fn: () => Promise<T>): Promise<T> => {
+  const p = chain.then(fn, fn);
+  chain = p.catch(() => {});
+  return p;
+};
+const images = new Map<number, RGBAImage>();
+
 self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
   const msg = ev.data;
   if (msg.type === 'init') {
@@ -69,14 +79,34 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
     }
     return;
   }
-  if (msg.type === 'run') {
-    try {
-      if (!initPromise) throw new Error('OCR engine not initialized');
-      await initPromise;
-      const { lines, ms } = await runOcr(msg.det, msg.src, msg.opts, runner(() => det!), runner(() => rec!), dict);
-      post({ type: 'result', id: msg.id, lines, ms });
-    } catch (e) {
-      post({ type: 'error', id: msg.id, message: String((e as Error)?.message ?? e) });
+  try {
+    if (msg.type === 'image') {
+      images.clear(); // one photo at a time
+      images.set(msg.imageId, msg.src);
+      post({ type: 'ok', id: msg.id });
+      return;
     }
+    if (!initPromise) throw new Error('OCR engine not initialized');
+    await initPromise;
+    if (msg.type === 'run') {
+      const { lines, ms } = await serial(() => runOcr(msg.det, msg.src, msg.opts, runner(() => det!), runner(() => rec!), dict));
+      post({ type: 'result', id: msg.id, lines, ms });
+    } else if (msg.type === 'detect') {
+      const src = images.get(msg.imageId);
+      if (!src) throw new Error('Image is no longer loaded');
+      const geoms = await serial(() => detectLines(msg.det, src.width, src.height, msg.opts, runner(() => det!)));
+      post({ type: 'detected', id: msg.id, geoms: geoms.map((g) => ({ quad: g.quad, vertical: g.vertical, score: g.score })) });
+    } else if (msg.type === 'rec') {
+      const src = images.get(msg.imageId);
+      if (!src) throw new Error('Image is no longer loaded');
+      const lines = await serial(async () => {
+        const out = [];
+        for (const g of msg.geoms) out.push(await recognizeLine(src, g, runner(() => rec!), dict));
+        return out;
+      });
+      post({ type: 'recognized', id: msg.id, lines });
+    }
+  } catch (e) {
+    post({ type: 'error', id: msg.id, message: String((e as Error)?.message ?? e) });
   }
 };

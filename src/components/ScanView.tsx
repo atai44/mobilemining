@@ -1,10 +1,15 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { scan, settings, updateSettings, view, showToast } from '../store';
-import { runOcr, rotateScan } from '../scanActions';
+import { signal } from '@preact/signals';
+import { scan, settings, updateSettings, view, showToast, ocrState, locate, indexOf } from '../store';
+import {
+  runOcr, rotateScan, startAnalysis, focusAt, setEditedText,
+  mergeSections, moveSection, splitSection, deleteSection, redirectSection, resetSections,
+} from '../scanActions';
+import type { LaidOutLine } from '../lib/ocr/layout';
 import type { TermResult } from '../lib/lookup';
 import { lookupAt as dictLookup } from '../dictionaries';
 import type { Rect } from '../lib/ocr/client';
-import type { Orientation } from '../lib/ocr/types';
+import type { Orientation, Point } from '../lib/ocr/types';
 import { Popup } from './Popup';
 import { MineSheet, type MineRequest } from './MineSheet';
 
@@ -13,11 +18,12 @@ type Mode = 'image' | 'text';
 export function ScanView() {
   const s = scan.value;
   const [mode, setMode] = useState<Mode>('image');
-  const [popup, setPopup] = useState<{ index: number; results: TermResult[]; anchor: DOMRect } | null>(null);
+  // The popup is tied to a (line, character) position so it survives lines being read in the background.
+  const [popup, setPopup] = useState<{ pos: { key: string; ci: number } | null; index: number; results: TermResult[]; anchor: DOMRect } | null>(null);
   const [mine, setMine] = useState<MineRequest | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => setPopup(null), [s?.text, mode]);
+  useEffect(() => setPopup(null), [s?.url, mode]);
 
   if (!s) {
     return (
@@ -29,18 +35,23 @@ export function ScanView() {
   }
 
   const effectiveMode: Mode = s.url ? mode : 'text';
+  // Current index of the popup's character (lines read since may have shifted it).
+  const popupIndex = popup ? (popup.pos ? indexOf(s, popup.pos) : popup.index) : -1;
+  const livePopup = popup && popupIndex >= 0 && s.text[popupIndex] !== undefined ? popup : null;
 
   const lookupAt = async (index: number, anchor: DOMRect) => {
     try {
-      const results = await dictLookup(scan.value!.text, index);
-      setPopup({ index, results, anchor });
+      const cur = scan.value!;
+      const pos = locate(cur, index);
+      const results = await dictLookup(cur.text, index);
+      setPopup({ pos, index, results, anchor });
     } catch (e) {
       showToast(String((e as Error).message ?? e), 'error');
     }
   };
 
-  const r0 = popup?.results[0];
-  const hl = popup ? { start: popup.index, end: popup.index + (r0 ? r0.span ?? r0.length : 1) } : null;
+  const r0 = livePopup?.results[0];
+  const hl = livePopup ? { start: popupIndex, end: popupIndex + (r0 ? r0.span ?? r0.length : 1) } : null;
 
   return (
     <div class="scan" ref={rootRef}>
@@ -49,18 +60,18 @@ export function ScanView() {
       ) : (
         <TextPanel highlight={hl} onTap={lookupAt} onShowImage={s.url ? () => setMode('image') : undefined} />
       )}
-      {popup && (
+      {livePopup && (
         <Popup
-          key={popup.index + ':' + popup.results.length}
-          index={popup.index}
-          results={popup.results}
-          anchor={popup.anchor}
+          key={(livePopup.pos ? livePopup.pos.key + ':' + livePopup.pos.ci : livePopup.index) + ':' + livePopup.results.length}
+          index={popupIndex}
+          results={livePopup.results}
+          anchor={livePopup.anchor}
           onClose={() => setPopup(null)}
           onRelookup={() => {
-            const el = rootRef.current?.querySelector(`[data-i="${popup.index}"]`);
-            lookupAt(popup.index, el?.getBoundingClientRect() ?? popup.anchor);
+            const el = rootRef.current?.querySelector(`[data-i="${popupIndex}"]`);
+            lookupAt(popupIndex, el?.getBoundingClientRect() ?? livePopup.anchor);
           }}
-          onEdit={(r) => setMine({ result: r, index: popup.index })}
+          onEdit={(r) => setMine({ result: r, index: popupIndex })}
         />
       )}
       {mine && <MineSheet req={mine} onClose={() => setMine(null)} />}
@@ -69,9 +80,11 @@ export function ScanView() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Photo reader: scroll / pinch-zoom the photo and tap characters directly on it.
+// Photo reader: scroll / pinch-zoom the photo and tap characters directly on it. The photo is
+// read in the background; tapping a part that hasn't been read yet reads it first.
 
 const MAX_ZOOM = 8;
+const SECTION_COLORS = ['#e8590c', '#1c7ed6', '#2f9e44', '#ae3ec9', '#f08c00', '#0c8599', '#d6336c', '#5c940d'];
 
 function ImageReader({ highlight, onTap, onInteract, onShowText }: {
   highlight: { start: number; end: number } | null;
@@ -87,6 +100,8 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
   const [fit, setFit] = useState(1); // zoom at which the whole page is visible
   const [selecting, setSelecting] = useState(false);
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [focus, setFocus] = useState<Point | null>(null);
+  const [sections, setSections] = useState(false);
   const pendingScroll = useRef<{ left: number; top: number } | null>(null);
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
@@ -163,11 +178,12 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
     if (pointers.current.size < 2) pinch.current = null;
   };
 
-  // Area selection (re-read part of the photo)
-  const toImage = (e: PointerEvent) => {
+  const toImage = (e: { clientX: number; clientY: number }): Point => {
     const r = svgRef.current!.getBoundingClientRect();
     return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H };
   };
+
+  // Area selection (re-read part of the photo)
   const selDown = (e: PointerEvent) => {
     if (!selecting) return;
     e.preventDefault();
@@ -192,16 +208,32 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
     }
   };
 
-  const onClick = (e: MouseEvent) => {
-    if (selecting) return;
+  const tapAt = async (index: number) => {
+    // Wait for the re-render that creates the character's tap target, then anchor the popup on it.
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const el = svgRef.current?.querySelector(`[data-i="${index}"]`);
+    if (el) onTap(index, el.getBoundingClientRect());
+  };
+
+  const onClick = async (e: MouseEvent) => {
+    if (selecting || sections) return;
     const el = (e.target as Element).closest('[data-i]');
-    if (!el) { onInteract(); return; }
-    onTap(Number((el as SVGElement).dataset.i), el.getBoundingClientRect());
+    if (el) { onTap(Number((el as SVGElement).dataset.i), el.getBoundingClientRect()); return; }
+    onInteract();
+    // Not read yet (or nothing found here): read this spot first.
+    const p = toImage(e);
+    setFocus(p);
+    try {
+      const i = await focusAt(p);
+      if (i >= 0) await tapAt(i);
+    } finally {
+      setFocus(null);
+    }
   };
 
   const setOrientation = (o: Orientation) => {
     updateSettings((st) => (st.ocr.orientation = o));
-    runOcr(null);
+    startAnalysis();
   };
 
   const cells = useMemo(
@@ -210,26 +242,32 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
   );
   const edited = !!s.lines.length && !cells.length;
   const centre = () => { const r = scrollRef.current!.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] as const; };
+  const pg = s.progress;
+  const unit = Math.max(W, H) / 100;
 
   return (
     <section class="image-reader">
       <div class="toolbar">
-        <button class={`button small ${selecting ? 'primary' : ''}`} onClick={() => setSelecting(!selecting)} title="Drag a box around text to read just that area" data-testid="select-area">
-          ⬚ {selecting ? 'Drag on photo…' : 'Area'}
+        <button class={`button small ${selecting ? 'primary' : ''}`} onClick={() => { setSections(false); setSelecting(!selecting); }} title="Drag a box around text to read just that area" data-testid="select-area">
+          ⬚ {selecting ? 'Drag…' : 'Area'}
         </button>
-        <button class="button small" onClick={() => runOcr(null)} disabled={s.busy} title="Read the whole photo again">↻</button>
-        <button class="button small" onClick={() => rotateScan()} disabled={s.busy} title="Rotate 90°">⟳</button>
+        <button class={`button small ${sections ? 'primary' : ''}`} onClick={() => { setSelecting(false); setSections(!sections); }} title="Fix how the page is split into sections and their reading order" data-testid="sections">
+          § Sections
+        </button>
+        <button class="button small" onClick={() => startAnalysis()} title="Read the whole photo again">↻</button>
+        <button class="button small" onClick={() => rotateScan()} title="Rotate 90°">⟳</button>
         <select class="small" value={orientation} onChange={(e) => setOrientation((e.target as HTMLSelectElement).value as Orientation)} title="Text direction">
           <option value="auto">Auto</option>
           <option value="horizontal">横</option>
           <option value="vertical">縦</option>
         </select>
         <span class="spacer" />
-        <button class="button small" onClick={() => zoomAt(zoom / 1.4, ...centre())} title="Zoom out">−</button>
-        <button class="button small" onClick={() => zoomAt(zoom * 1.4, ...centre())} title="Zoom in">+</button>
+        <button class="button small zoom-btn" onClick={() => zoomAt(zoom / 1.4, ...centre())} title="Zoom out">−</button>
+        <button class="button small zoom-btn" onClick={() => zoomAt(zoom * 1.4, ...centre())} title="Zoom in">+</button>
         <button class="button small" onClick={() => { const [x, y] = centre(); zoomAt(Math.abs(zoom - fit) < 0.01 ? 1 : fit, x, y); }} title="Fit page / fit width">⤢</button>
         <button class="button small" onClick={onShowText} title="Show the recognized text" data-testid="show-text">Aa</button>
       </div>
+      <ProgressBar />
       {edited && <div class="banner small">You edited the text, so it no longer lines up with the photo. Look words up in the text view (Aa), or press ↻ to read the photo again.</div>}
       <div
         class={`image-scroll ${selecting ? 'selecting' : ''}`}
@@ -254,10 +292,13 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
             onPointerUp={selUp}
             onPointerCancel={() => setDrag(null)}
           >
-            {s.lines.map((l, i) => (
-              <polygon key={`l${i}`} class="line-box" points={l.quad.map((p) => `${p.x},${p.y}`).join(' ')} />
+            {s.pending.map((p) => (
+              <polygon key={p.key} class={`pending${p.busy ? ' busy' : ''}`} points={p.quad.map((q) => `${q.x},${q.y}`).join(' ')} />
             ))}
-            {cells.map((c) => (
+            {!sections && s.lines.map((l, i) => (
+              <polygon key={`l${l.key ?? i}`} class="line-box" points={l.quad.map((p) => `${p.x},${p.y}`).join(' ')} />
+            ))}
+            {!sections && cells.map((c) => (
               <polygon
                 key={c.i}
                 data-i={c.i}
@@ -265,15 +306,120 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
                 points={c.points}
               />
             ))}
+            {focus && <circle class="focus-dot" cx={focus.x} cy={focus.y} r={unit * 1.6} />}
             {drag && (
               <rect class="sel-rect" x={Math.min(drag.x0, drag.x1)} y={Math.min(drag.y0, drag.y1)} width={Math.abs(drag.x1 - drag.x0)} height={Math.abs(drag.y1 - drag.y0)} />
             )}
+            {sections && <SectionOverlay unit={unit} />}
           </svg>
         </div>
       </div>
-      {s.busy && <div class="busy-overlay"><div class="spinner" />Reading text…</div>}
-      {!s.busy && !s.lines.length && <div class="banner small">{s.error ?? 'No text found. Try ⬚ Area around the text, or retake the photo closer.'}</div>}
+      {sections && <SectionBar onDone={() => setSections(false)} />}
+      {!pg || pg.phase !== 'done' || s.lines.length || s.busy ? null : <div class="banner small">{s.error ?? 'No text found. Try ⬚ Area around the text, or retake the photo closer.'}</div>}
     </section>
+  );
+}
+
+function ProgressBar() {
+  const s = scan.value!;
+  const pg = s.progress;
+  const ocr = ocrState.value;
+  let label = '';
+  let frac: number | undefined;
+  if (s.busy) label = 'Reading selected area…';
+  else if (pg?.phase === 'models') {
+    label = ocr.total ? `Loading OCR models ${((ocr.loaded ?? 0) / 1e6).toFixed(0)}/${(ocr.total / 1e6).toFixed(0)} MB` : 'Loading OCR models…';
+    frac = ocr.total ? (ocr.loaded ?? 0) / ocr.total : undefined;
+  } else if (pg?.phase === 'detect') label = 'Finding text…';
+  else if (pg?.phase === 'read' && pg.total) { label = `Reading ${pg.done}/${pg.total} lines — tap anywhere to read that part first`; frac = pg.done / pg.total; }
+  else if (pg?.phase === 'error') label = s.error ?? 'OCR failed';
+  if (!label) return null;
+  return (
+    <div class={`progress-strip ${pg?.phase === 'error' ? 'error' : ''}`} data-testid="ocr-progress">
+      <span>{label}</span>
+      <div class="bar"><div style={{ width: frac === undefined ? '30%' : `${Math.round(frac * 100)}%` }} class={frac === undefined ? 'indeterminate' : ''} /></div>
+    </div>
+  );
+}
+
+// --- Section editing ------------------------------------------------------------------------
+
+const selection = signal<{ block: number; key: string; merging: boolean }>({ block: -1, key: '', merging: false });
+
+function sectionShapes(lines: LaidOutLine[]) {
+  const by = new Map<number, LaidOutLine[]>();
+  for (const l of lines) by.set(l.block, [...(by.get(l.block) ?? []), l]);
+  return [...by.entries()].sort((a, b) => a[0] - b[0]).map(([block, ls]) => {
+    const xs = ls.flatMap((l) => l.quad.map((p) => p.x)), ys = ls.flatMap((l) => l.quad.map((p) => p.y));
+    const vertical = ls.filter((l) => l.vertical).length * 2 >= ls.length;
+    return { block, lines: ls, x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), vertical };
+  });
+}
+
+function SectionOverlay({ unit }: { unit: number }) {
+  const s = scan.value!;
+  const sel = selection.value;
+  const shapes = sectionShapes(s.lines as LaidOutLine[]);
+  const pick = (block: number, key: string) => {
+    if (sel.merging && sel.block >= 0 && block !== sel.block) {
+      mergeSections(sel.block, block);
+      selection.value = { block: Math.min(sel.block, block), key: '', merging: false };
+    } else selection.value = { block, key, merging: false };
+  };
+  return (
+    <g class="sections">
+      {shapes.map((sh) => {
+        const color = SECTION_COLORS[sh.block % SECTION_COLORS.length];
+        const selected = sh.block === sel.block;
+        const pad = unit * 0.6;
+        const bx = sh.vertical ? sh.x1 + pad : sh.x0 - pad, by = sh.y0 - pad;
+        return (
+          <g key={sh.block} data-section={sh.block}>
+            <rect x={sh.x0 - pad} y={sh.y0 - pad} width={sh.x1 - sh.x0 + 2 * pad} height={sh.y1 - sh.y0 + 2 * pad} rx={unit * 0.6}
+              class={`section-box${selected ? ' selected' : ''}`} style={{ stroke: color, fill: color }} />
+            {sh.lines.map((l) => (
+              <polygon key={l.key} class={`section-line${selected && l.key === sel.key ? ' split-at' : ''}`} points={l.quad.map((p) => `${p.x},${p.y}`).join(' ')}
+                data-section-line={l.key} onClick={(e) => { e.stopPropagation(); pick(sh.block, l.key!); }} />
+            ))}
+            <circle cx={bx} cy={by} r={unit * 1.7} style={{ fill: color }} class="section-badge" />
+            <text x={bx} y={by} font-size={unit * 1.9} class="section-num" text-anchor="middle" dominant-baseline="central">{sh.block + 1}</text>
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+function SectionBar({ onDone }: { onDone: () => void }) {
+  const s = scan.value!;
+  const sel = selection.value;
+  const count = new Set((s.lines as LaidOutLine[]).map((l) => l.block)).size;
+  const valid = sel.block >= 0 && sel.block < count;
+  const firstKey = (s.lines as LaidOutLine[]).find((l) => l.block === sel.block)?.key;
+  const set = (v: Partial<typeof sel>) => (selection.value = { ...sel, ...v });
+  return (
+    <div class="section-bar" data-testid="section-bar">
+      {!valid ? (
+        <span class="small">Tap a section to change it. Numbers show the reading order.</span>
+      ) : sel.merging ? (
+        <span class="small">Tap the section to merge with section {sel.block + 1}… <button class="button small" onClick={() => set({ merging: false })}>Cancel</button></span>
+      ) : (
+        <div class="row wrap">
+          <b class="small">§{sel.block + 1}</b>
+          <button class="button small" disabled={sel.block === 0} onClick={() => { moveSection(sel.block, -1); set({ block: sel.block - 1 }); }} title="Read earlier" data-testid="sec-earlier">◀ Earlier</button>
+          <button class="button small" disabled={sel.block >= count - 1} onClick={() => { moveSection(sel.block, 1); set({ block: sel.block + 1 }); }} title="Read later" data-testid="sec-later">Later ▶</button>
+          <button class="button small" onClick={() => set({ merging: true })} data-testid="sec-merge">Merge…</button>
+          <button class="button small" disabled={!sel.key || sel.key === firstKey} onClick={() => { splitSection(sel.block, sel.key); set({ block: sel.block + 1 }); }} title="Start a new section at the line you tapped" data-testid="sec-split">Split here</button>
+          <button class="button small" onClick={() => redirectSection(sel.block, 'vertical')} title="Re-read this section as vertical text" data-testid="sec-vertical">縦</button>
+          <button class="button small" onClick={() => redirectSection(sel.block, 'horizontal')} title="Re-read this section as horizontal text" data-testid="sec-horizontal">横</button>
+          <button class="button small danger" onClick={() => { deleteSection(sel.block); set({ block: -1, key: '' }); }} title="Ignore this section" data-testid="sec-delete">🗑</button>
+        </div>
+      )}
+      <div class="row">
+        {s.sectionsEdited && <button class="button small" onClick={() => { resetSections(); set({ block: -1, key: '' }); }} data-testid="sec-reset">Reset</button>}
+        <button class="button small primary" onClick={() => { set({ block: -1, key: '', merging: false }); onDone(); }}>Done</button>
+      </div>
+    </div>
   );
 }
 
@@ -312,8 +458,7 @@ function TextPanel({ highlight, onTap, onShowImage }: {
   };
 
   const saveEdit = () => {
-    const cps = Array.from(draft.normalize('NFC'));
-    scan.value = { ...s, text: cps, meta: cps.map(() => null), lineOf: cps.map(() => -1), geom: cps.map(() => null), ruby: [] };
+    setEditedText(draft);
     setEditing(false);
   };
 

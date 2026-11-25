@@ -19,6 +19,12 @@ export interface Scan {
   ruby: { start: number; end: number; text: string }[];
   /** Outline of each character on the photo (x0,y0,x1,y1,x2,y2,x3,y3), null for separators/edited text. */
   geom: (number[] | null)[];
+  /** Detected lines not read yet (drawn as placeholders on the photo). */
+  pending: { key: string; quad: { x: number; y: number }[]; busy: boolean }[];
+  /** Background reading progress. */
+  progress: { phase: 'models' | 'detect' | 'read' | 'done' | 'error'; done: number; total: number } | null;
+  /** The user edited the sections (reading order / grouping). */
+  sectionsEdited: boolean;
   busy: boolean;
   error: string | null;
   timing?: number;
@@ -94,4 +100,21 @@ export function charCells(l: OcrLine): number[][] {
     const a1 = i < n - 1 ? (u + us[i + 1]) / 2 : Math.min(1, u + half);
     return [...P(a0, 0), ...P(a1, 0), ...P(a1, 1), ...P(a0, 1)];
   });
+}
+
+/** Stable position of a character: its line's key and offset, which survive background updates. */
+export function locate(s: Pick<Scan, 'lineOf' | 'lines'>, index: number): { key: string; ci: number } | null {
+  const li = s.lineOf[index];
+  const key = li >= 0 ? s.lines[li]?.key : undefined;
+  if (key === undefined) return null;
+  let start = index;
+  while (start > 0 && s.lineOf[start - 1] === li) start--;
+  return { key, ci: index - start };
+}
+
+export function indexOf(s: Pick<Scan, 'lineOf' | 'lines'>, pos: { key: string; ci: number }): number {
+  const li = s.lines.findIndex((l) => l.key === pos.key);
+  if (li < 0) return -1;
+  const start = s.lineOf.indexOf(li);
+  return start < 0 || s.lineOf[start + pos.ci] !== li ? -1 : start + pos.ci;
 }

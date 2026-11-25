@@ -409,6 +409,26 @@ function overlap1d(a: number, al: number, b: number, bl: number): number {
   return o / Math.max(1, Math.min(al, bl));
 }
 
+/** Step 1: find text lines (fast, whole image). Quads are in `src` pixel space. */
+export async function detectLines(det: RGBAImage, srcW: number, srcH: number, opts: OcrOptions, runDet: RunModel): Promise<LineGeom[]> {
+  const probT = await runDet(detTensor(det));
+  const [, , ph, pw] = probT.dims;
+  const comps = findComponents(probT.data, pw, ph, 0.2, opts.boxThresh, opts.unclipRatio);
+  return componentsToLines(comps, pw, ph, srcW, srcH, opts.orientation);
+}
+
+/** Step 2: read one detected line. */
+export async function recognizeLine(src: RGBAImage, g: LineGeom, runRec: RunModel, dict: string[]): Promise<OcrLine | null> {
+  const strip = recTensor(src, g.quad);
+  const out = await runRec(strip);
+  let decoded = ctcDecode(out, dict);
+  if (g.vertical && decoded.length) decoded = await restoreVerticalMarks(strip, out.dims[1], decoded, runRec, dict);
+  const T = out.dims[1];
+  const chars: OcrChar[] = decoded.map(({ t, ...c }) => ({ ...c, u: (t + 0.5) / T }));
+  if (!chars.length) return null;
+  return { text: chars.map((c) => c.c).join(''), chars, vertical: g.vertical, quad: g.quad, box: quadBox(g.quad), score: g.score };
+}
+
 export async function runOcr(
   det: RGBAImage,
   src: RGBAImage,
@@ -418,21 +438,12 @@ export async function runOcr(
   dict: string[],
 ): Promise<{ lines: OcrLine[]; ms: { det: number; rec: number } }> {
   const t0 = performance.now();
-  const probT = await runDet(detTensor(det));
-  const [, , ph, pw] = probT.dims;
-  const comps = findComponents(probT.data, pw, ph, 0.2, opts.boxThresh, opts.unclipRatio);
-  const geoms = componentsToLines(comps, pw, ph, src.width, src.height, opts.orientation);
+  const geoms = await detectLines(det, src.width, src.height, opts, runDet);
   const t1 = performance.now();
   const lines: OcrLine[] = [];
   for (const g of geoms) {
-    const strip = recTensor(src, g.quad);
-    const out = await runRec(strip);
-    let decoded = ctcDecode(out, dict);
-    if (g.vertical && decoded.length) decoded = await restoreVerticalMarks(strip, out.dims[1], decoded, runRec, dict);
-    const T = out.dims[1];
-    const chars: OcrChar[] = decoded.map(({ t, ...c }) => ({ ...c, u: (t + 0.5) / T }));
-    if (!chars.length) continue;
-    lines.push({ text: chars.map((c) => c.c).join(''), chars, vertical: g.vertical, quad: g.quad, box: quadBox(g.quad), score: g.score });
+    const l = await recognizeLine(src, g, runRec, dict);
+    if (l) lines.push(l);
   }
   return { lines: sortLines(lines), ms: { det: t1 - t0, rec: performance.now() - t1 } };
 }
