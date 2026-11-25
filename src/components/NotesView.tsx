@@ -35,7 +35,7 @@ export function NotesView() {
   };
 
   const exportTsv = () => {
-    const blob = new Blob([notesToTsv(notes ?? [], st.anki.tags)], { type: 'text/tab-separated-values' });
+    const blob = new Blob([notesToTsv(notes ?? [], st)], { type: 'text/tab-separated-values' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `mobilemining-${new Date().toISOString().slice(0, 10)}.txt`;

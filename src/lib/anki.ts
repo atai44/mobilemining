@@ -503,14 +503,37 @@ export function ankiMobileUrl(settings: Settings, values: Record<string, string>
 
 const TSV_COLUMNS = ['expression', 'reading', 'furigana-plain', 'glossary', 'sentence-bold', 'sentence-furigana-plain', 'pitch-accent-positions', 'frequency-harmonic-rank', 'source', 'date'];
 
-export function notesToTsv(notes: MinedNote[], tags: string): string {
-  const clean = (s: string) => (s ?? '').replace(/[\t\r\n]+/g, ' ');
-  const lines = [
-    '#separator:tab',
-    '#html:true',
-    `#columns:${[...TSV_COLUMNS, 'tags'].join('\t')}`,
-    `#tags column:${TSV_COLUMNS.length + 1}`,
-  ];
-  for (const n of notes) lines.push([...TSV_COLUMNS.map((c) => clean(n.fields[c] ?? n.fields[c.replace('-plain', '')] ?? '')), tags].join('\t'));
+/** A TSV field: one line, quoted when it contains quotes (Anki's importer understands CSV quoting). */
+function tsvField(v: string): string {
+  const s = (v ?? '').replace(/[\t\r\n]+/g, ' ');
+  return s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/**
+ * Mined cards as a file for Anki's File → Import (desktop) / Import (AnkiDroid). With an export
+ * note type configured (e.g. imported from Yomitan), its fields are filled from the same markers
+ * as AnkiConnect, and the #notetype / #deck headers make Anki pick them automatically.
+ * Images and audio can't travel in a text file and are left empty.
+ */
+export function notesToTsv(notes: MinedNote[], settings: Settings): string {
+  const a = settings.anki;
+  const ex = a.export;
+  const names = Object.keys(ex.fields);
+  const lines = ['#separator:tab', '#html:true'];
+  if (names.length && ex.model) lines.push(`#notetype:${ex.model}`);
+  if (names.length && ex.deck) lines.push(`#deck:${ex.deck}`);
+  const columns = names.length ? names : TSV_COLUMNS;
+  lines.push(`#columns:${[...columns, 'tags'].join('\t')}`, `#tags column:${columns.length + 1}`);
+  for (const n of notes) {
+    let row: string[];
+    if (names.length) {
+      const values: Record<string, string> = { ...n.fields };
+      for (const m of MEDIA_MARKERS) values[m] = '';
+      row = names.map((f) => fillTemplate(ex.fields[f], values).replace(/<img [^>]*data-media-path[^>]*>/g, '').trim());
+    } else {
+      row = TSV_COLUMNS.map((c) => n.fields[c] ?? n.fields[c.replace('-plain', '')] ?? '');
+    }
+    lines.push([...row, a.tags].map(tsvField).join('\t'));
+  }
   return lines.join('\n') + '\n';
 }

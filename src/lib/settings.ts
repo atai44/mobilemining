@@ -53,6 +53,8 @@ export interface Settings {
     image: ImageMode;
     audio: boolean;
     mobile: { profile: string; deck: string; model: string; fields: Record<string, string> };
+    /** Note type for the TSV export (empty fields: a fixed set of columns). */
+    export: { deck: string; model: string; fields: Record<string, string> };
   };
 }
 
@@ -84,6 +86,7 @@ export const DEFAULT_SETTINGS: Settings = {
       model: 'Basic',
       fields: { Front: '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}', Back: '{furigana}<br>{glossary}' },
     },
+    export: { deck: '', model: '', fields: {} },
   },
 };
 

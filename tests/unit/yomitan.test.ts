@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { convertKanjiRow, convertTermRow } from '../../src/lib/yomitan/importer';
 import { renderGlossaryItem, renderStructured, glossaryText } from '../../src/lib/yomitan/render';
 import { findTerms, parseFrequency, yomitanConds } from '../../src/lib/lookup';
-import { buildMarkerValues, fillTemplate, guessMarker } from '../../src/lib/anki';
+import { buildMarkerValues, fillTemplate, guessMarker, notesToTsv } from '../../src/lib/anki';
 import { pitchCategory, pitchHtml, pitchPattern, morae } from '../../src/lib/pitch';
 import { applyYomitanProfile, parseYomitanSettings } from '../../src/lib/yomitan/settingsImport';
 import { DEFAULT_SETTINGS } from '../../src/lib/settings';
@@ -154,11 +154,26 @@ describe('Yomitan settings import', () => {
     s.dictionaries = [{ name: 'JMdict (built-in)', enabled: true }, { name: 'KANJIDIC2 (built-in)', enabled: true }, { name: 'JPDB', enabled: true }, { name: 'Jitendex', enabled: true }];
     const f = parseYomitanSettings(backup);
     const sum = applyYomitanProfile(s, f.profiles[0], ['Jitendex', 'JPDB']);
-    expect(s.anki).toMatchObject({ method: 'ankiconnect', key: 'k', tags: 'yomitan book', deck: 'Mining', model: 'Lapis', duplicateBehavior: 'overwrite', duplicateScope: 'deck' });
-    expect(s.anki.fields).toEqual({ Expression: '{expression}', Sentence: '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}', Weird: '{some-custom}' });
+    // The sending method is kept; the note type applies to AnkiConnect, AnkiMobile and the export.
+    expect(s.anki).toMatchObject({ method: 'local', key: 'k', tags: 'yomitan book', deck: 'Mining', model: 'Lapis', duplicateBehavior: 'overwrite', duplicateScope: 'deck' });
+    const fields = { Expression: '{expression}', Sentence: '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}', Weird: '{some-custom}' };
+    expect(s.anki.fields).toEqual(fields);
+    expect(s.anki.mobile).toMatchObject({ deck: 'Mining', model: 'Lapis', fields, profile: 'User 1' });
+    expect(s.anki.export).toEqual({ deck: 'Mining', model: 'Lapis', fields });
     expect(s.dictionaries.map((d) => [d.name, d.enabled])).toEqual([['Jitendex', true], ['JPDB', false], ['JMdict (built-in)', true], ['KANJIDIC2 (built-in)', true]]);
     expect(sum.warnings.join(' ')).toContain('{some-custom}');
     expect(sum.warnings.join(' ')).toContain('Missing Dict');
+  });
+  it('exports TSV with the export note type', () => {
+    const s = structuredClone(DEFAULT_SETTINGS);
+    s.anki.tags = 'mm';
+    const note = { created: 1, status: 'pending' as const, fields: { expression: '読む', reading: 'よむ', 'cloze-prefix': '本を', 'cloze-body': '読んだ', 'cloze-suffix': '。', glossary: '<div class="g">to read</div>' } };
+    // No export note type: the fixed columns
+    expect(notesToTsv([note], s).split('\n')[2]).toMatch(/^#columns:expression\treading/);
+    s.anki.export = { deck: 'Mining', model: 'Lapis', fields: { Expression: '{expression}', Sentence: '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}', Meaning: '{glossary}', Picture: '{image}' } };
+    const lines = notesToTsv([note], s).trim().split('\n');
+    expect(lines.slice(0, 6)).toEqual(['#separator:tab', '#html:true', '#notetype:Lapis', '#deck:Mining', '#columns:Expression\tSentence\tMeaning\tPicture\ttags', '#tags column:5']);
+    expect(lines[6].split('\t')).toEqual(['読む', '本を<b>読んだ</b>。', '"<div class=""g"">to read</div>"', '', 'mm']);
   });
   it('supports the older anki.terms format and rejects other files', () => {
     const s = structuredClone(DEFAULT_SETTINGS);

@@ -241,6 +241,25 @@ check(await page.$eval('[data-field="MainDefinition"]', (e) => e.value) === '{si
 const order = await page.$$eval('.dict-title', (els) => els.map((e) => e.textContent));
 check(order[0] === 'Test Dict' && order[1] === 'Test Freq', `dictionary order from Yomitan: ${order.join(', ')}`);
 await shot('06-settings-yomitan');
+// The imported note type also applies to AnkiMobile and the TSV export
+await page.click('.segmented >> text=AnkiMobile');
+const mob = [await page.$eval('[data-testid=mobile-model]', (e) => e.value), await page.$eval('[data-testid=mobile-note-type] [data-field="MainDefinition"]', (e) => e.value)];
+await page.click('.segmented >> text=Export');
+const exp = [await page.$eval('[data-testid=export-model]', (e) => e.value), await page.$eval('[data-testid=export-deck]', (e) => e.value)];
+check(mob[0] === 'Lapis' && mob[1] === '{single-glossary-test-dict}' && exp[0] === 'Lapis' && exp[1] === 'Mining', `Yomitan note type used for AnkiMobile and export (${mob.join(', ')}; ${exp.join(', ')})`);
+{
+  await tab('Mined');
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('text=TSV ↓')]);
+  const tsv = await readFile(await dl.path(), 'utf8');
+  const rows = tsv.trim().split('\n');
+  const cols = rows.find((r) => r.startsWith('#columns:')).slice(9).split('\t');
+  const row = rows.at(-1).split('\t');
+  const val = (f) => row[cols.indexOf(f)];
+  check(rows.includes('#notetype:Lapis') && rows.includes('#deck:Mining') && val('Expression') === '読む' && val('Sentence').includes('<b>読まなかった</b>'), `TSV export fills the Lapis fields (${cols.slice(0, 4).join(', ')}…: ${val('Expression')} / ${val('Sentence')})`);
+  await tab('Settings');
+}
+await page.click('.segmented >> text=AnkiConnect');
+await page.waitForSelector('.conn-ok');
 
 // 6. Furigana: removed from the text, shown as ruby, available for cards
 const rubyExpected = ['昨日は図書館で本を読んだ。', '薔薇の花が咲いている。', '明日も学校に行きます。'];

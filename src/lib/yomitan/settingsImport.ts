@@ -1,6 +1,6 @@
 // Imports the useful parts of a Yomitan settings backup (Settings → Backup → Export Settings):
-// AnkiConnect server/key, deck, note type, field markers, tags, duplicate handling, and
-// dictionary order / enabled state.
+// AnkiConnect server/key, deck, note type and field markers (used for AnkiConnect, AnkiMobile and
+// the TSV export alike), tags, duplicate handling, and dictionary order / enabled state.
 import type { DictionarySetting, DuplicateBehavior, Settings } from '../settings';
 import { MARKERS } from '../anki';
 
@@ -43,15 +43,16 @@ export function applyYomitanProfile(s: Settings, profile: YomitanProfile, instal
     const formats = Array.isArray(anki.cardFormats) ? anki.cardFormats : [];
     const term = formats.find((f: any) => f?.type === 'term' && f.model) ?? formats.find((f: any) => f?.type === 'term') ?? anki.terms;
     if (term && (term.deck || term.model)) {
-      s.anki.method = 'ankiconnect';
-      s.anki.deck = term.deck ?? '';
-      s.anki.model = term.model ?? '';
       const fields: Record<string, string> = {};
       for (const [name, v] of Object.entries(term.fields ?? {})) {
         fields[name] = typeof v === 'string' ? v : typeof (v as any)?.value === 'string' ? (v as any).value : '';
       }
-      s.anki.fields = fields;
-      notes.push(`Anki: deck “${s.anki.deck}”, note type “${s.anki.model}”, ${Object.keys(fields).length} fields`);
+      // The same note type for every way of sending cards: AnkiConnect, AnkiMobile and the TSV export.
+      const deck = term.deck ?? '', model = term.model ?? '';
+      Object.assign(s.anki, { deck, model, fields: { ...fields } });
+      Object.assign(s.anki.mobile, { deck, model, fields: { ...fields } });
+      s.anki.export = { deck, model, fields: { ...fields } };
+      notes.push(`Anki: deck “${deck}”, note type “${model}”, ${Object.keys(fields).length} fields`);
       const unknown = new Set<string>();
       for (const t of Object.values(fields)) for (const m of t.matchAll(/\{([a-z0-9][a-z0-9._\-[\]]*)\}/gi)) {
         const name = m[1];

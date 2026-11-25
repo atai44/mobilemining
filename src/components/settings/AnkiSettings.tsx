@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { settings, showToast, updateSettings } from '../../store';
 import { client, createMobileMiningModel, dictSlug, guessMarker, MARKERS, MM_FIELDS, MM_MODEL } from '../../lib/anki';
-import type { AnkiMethod, DuplicateBehavior, ImageMode } from '../../lib/settings';
+import type { AnkiMethod, DuplicateBehavior, ImageMode, Settings } from '../../lib/settings';
 import { applyYomitanProfile, parseYomitanSettings, type ImportSummary, type YomitanSettingsFile } from '../../lib/yomitan/settingsImport';
 import { installedDictionaries, refreshDictionaries } from '../../dictionaries';
 import { Toggle } from '../ui';
@@ -200,27 +200,16 @@ export function AnkiSettings() {
             <span>Profile</span>
             <input value={a.mobile.profile} onInput={(e) => updateSettings((s) => (s.anki.mobile.profile = (e.target as HTMLInputElement).value))} />
           </label>
-          <label class="field">
-            <span>Deck</span>
-            <input value={a.mobile.deck} onInput={(e) => updateSettings((s) => (s.anki.mobile.deck = (e.target as HTMLInputElement).value))} />
-          </label>
-          <label class="field">
-            <span>Note type</span>
-            <input value={a.mobile.model} onInput={(e) => updateSettings((s) => (s.anki.mobile.model = (e.target as HTMLInputElement).value))} />
-          </label>
-          <FieldMapping
-            fields={a.mobile.fields}
-            editableNames
-            extraMarkers={dynamicMarkers}
-            onChange={(f, v) => updateSettings((s) => (s.anki.mobile.fields[f] = v))}
-            onRename={(from, to) => updateSettings((s) => {
-              s.anki.mobile.fields = Object.fromEntries(Object.entries(s.anki.mobile.fields).map(([k, v]) => [k === from ? to : k, v]).filter(([k]) => k));
-            })}
-            onAdd={() => updateSettings((s) => (s.anki.mobile.fields[`Field${Object.keys(s.anki.mobile.fields).length + 1}`] = ''))}
-          />
+          <NoteTypeEditor pick={(s) => s.anki.mobile} markers={dynamicMarkers} testid="mobile" />
         </>
       )}
 
+      {a.method === 'local' && (
+        <>
+          <p class="muted small">Mined → TSV ↓ → Anki: File → Import (AnkiDroid: Import). No images or audio.</p>
+          <NoteTypeEditor pick={(s) => s.anki.export} markers={dynamicMarkers} testid="export" optional />
+        </>
+      )}
 
       <label class="field">
         <span>Tags</span>
@@ -235,6 +224,42 @@ export function AnkiSettings() {
         </select>
       </label>
     </section>
+  );
+}
+
+type ManualNoteType = { deck: string; model: string; fields: Record<string, string> };
+
+/** Deck, note type and field markers typed by hand (AnkiMobile and the TSV export can't list them). */
+function NoteTypeEditor({ pick, markers, testid, optional }: {
+  pick: (s: Settings) => ManualNoteType;
+  markers: { name: string; description: string }[];
+  testid: string;
+  /** Empty fields are allowed (the export then uses a fixed set of columns). */
+  optional?: boolean;
+}) {
+  const v = pick(settings.value);
+  const set = (fn: (t: ManualNoteType) => void) => updateSettings((s) => fn(pick(s)));
+  return (
+    <div data-testid={`${testid}-note-type`}>
+      <label class="field">
+        <span>Deck</span>
+        <input value={v.deck} placeholder={optional ? '—' : undefined} onInput={(e) => set((t) => (t.deck = (e.target as HTMLInputElement).value))} data-testid={`${testid}-deck`} />
+      </label>
+      <label class="field">
+        <span>Note type</span>
+        <input value={v.model} placeholder={optional ? '—' : undefined} onInput={(e) => set((t) => (t.model = (e.target as HTMLInputElement).value))} data-testid={`${testid}-model`} />
+      </label>
+      <FieldMapping
+        fields={v.fields}
+        editableNames
+        extraMarkers={markers}
+        onChange={(f, val) => set((t) => (t.fields[f] = val))}
+        onRename={(from, to) => set((t) => {
+          t.fields = Object.fromEntries(Object.entries(t.fields).map(([k, x]) => [k === from ? to : k, x]).filter(([k]) => k));
+        })}
+        onAdd={() => set((t) => (t.fields[`Field${Object.keys(t.fields).length + 1}`] = ''))}
+      />
+    </div>
   );
 }
 
