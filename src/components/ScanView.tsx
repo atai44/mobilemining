@@ -4,9 +4,10 @@ import { scan, settings, updateSettings, view, showToast, ocrState, locate, inde
 import {
   runOcr, rotateScan, startAnalysis, focusAt, setEditedText, showPdfPage,
   mergeSections, moveSection, deleteSection, redirectSection, resetSections,
-  rereadSection, createArea, updateArea, deleteArea, rereadArea, areaCorners, type Area,
+  rereadSection, createArea, updateArea, deleteArea, areaCorners, type Area,
 } from '../scanActions';
 import type { LaidOutLine } from '../lib/ocr/layout';
+import { inArea } from '../lib/areas';
 import type { TermResult } from '../lib/lookup';
 import { lookupAt as dictLookup } from '../dictionaries';
 import type { Rect } from '../lib/ocr/client';
@@ -148,6 +149,26 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
   const [fit, setFit] = useState(1); // zoom at which the whole page is visible
   const [draw, setDraw] = useState<'area' | null>(null);
   const [selArea, setSelArea] = useState<string | null>(null);
+  const drewAt = useRef(0);
+  // Interacting with anything other than the selected box (or its bar) puts the box away:
+  // from then on it is a section like any other.
+  useEffect(() => {
+    if (!selArea) return;
+    const away = (e: Event) => {
+      const t = e.target as Element;
+      if (Date.now() - drewAt.current < 400 || t.closest?.('[data-area], [data-testid=area-bar]')) return;
+      // A tap on the photo inside the box keeps it selected.
+      const area = scan.value?.areas.find((x) => x.id === selArea);
+      const svg = svgRef.current, ev = e as MouseEvent;
+      if (area && svg && t.closest?.('svg') === svg) {
+        const r = svg.getBoundingClientRect();
+        if (inArea(area, { x: ((ev.clientX - r.left) / r.width) * W, y: ((ev.clientY - r.top) / r.height) * H })) return;
+      }
+      setSelArea(null);
+    };
+    document.addEventListener('click', away, true);
+    return () => document.removeEventListener('click', away, true);
+  }, [selArea]);
   const [flash, setFlash] = useState<string | null>(null);
   const selecting = draw !== null;
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -267,14 +288,11 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
     if (rect.w > 12 && rect.h > 12) {
       setDraw(null);
       // The box becomes its own section (reading the area first if no text was found in it).
-      const { area: a, reading } = createArea(rect);
+      const { area: a } = createArea(rect);
+      drewAt.current = Date.now();
       setSelArea(a.id);
       setFlash(a.id);
       setTimeout(() => setFlash((f) => (f === a.id ? null : f)), 1400);
-      reading.then(() => {
-        const info = scan.value?.areas.find((x) => x.id === a.id);
-        showToast(info && info.count ? `§${info.section + 1} · ${info.count} line${info.count === 1 ? '' : 's'}` : 'No text', info?.count ? 'ok' : 'info');
-      });
     }
   };
 
@@ -378,6 +396,7 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
             onPointerMove={selMove}
             onPointerUp={selUp}
             onPointerCancel={() => setDrag(null)}
+            data-areas={s.areas.length}
           >
             {s.pending.map((p) => (
               <polygon key={p.key} class={`pending${p.busy ? ' busy' : ''}`} points={p.quad.map((q) => `${q.x},${q.y}`).join(' ')} />
@@ -524,7 +543,8 @@ function AreaLayer({ svgRef, W, selected, drawing, flash, onSelect }: {
   return (
     <g class={`areas${drawing ? ' drawing' : ''}`}>
       {/* The selected box is drawn last, so nothing else can sit on top of its handles. */}
-      {[...s.areas.filter((x) => x.id !== selected), ...s.areas.filter((x) => x.id === selected)].map((info) => {
+      {/* Only the selected box is drawn; once put away it shows like any other section. */}
+      {s.areas.filter((x) => x.id === selected).map((info) => {
         const a = live?.id === info.id ? { ...info, ...live.geom } : info;
         const pts = areaCorners({ ...a, id: a.id });
         const color = SECTION_COLORS[Math.max(0, info.section) % SECTION_COLORS.length];
@@ -594,11 +614,12 @@ function AreaBar({ id, onDone }: { id: string; onDone: () => void }) {
   return (
     <div class="section-bar" data-testid="area-bar">
       <span class="small area-summary">
-        <b>{info.section >= 0 ? `§${info.section + 1}` : '∅'}</b> · {info.count} line{info.count === 1 ? '' : 's'}
-        {text && <span class="area-text" lang="ja" data-testid="area-text">{text}</span>}
+        {info.section >= 0 && <b>§{info.section + 1}</b>}
+        <span class={`area-text${info.reading ? ' reading' : ''}`} lang="ja" data-testid="area-text" data-reading={info.reading ? '' : undefined}>
+          {text || (info.reading ? '…' : '∅')}
+        </span>
       </span>
       <div class="row">
-        <button class="button small" onClick={() => rereadArea(id)} title="Re-read" data-testid="area-reread">↻</button>
         <button class="button small danger" onClick={() => { deleteArea(id); onDone(); }} title="Remove" data-testid="area-delete">🗑</button>
         <button class="button small primary" onClick={onDone}>Done</button>
       </div>

@@ -1,5 +1,5 @@
 import { localEngine, recognize, type Rect } from './lib/ocr/client';
-import { scan, settings, view, ocrState, showToast, textFromLines, type Scan } from './store';
+import { scan, settings, view, ocrState, showToast, textFromLines, trimLine, type Scan } from './store';
 import type { OcrLine, Orientation, Point } from './lib/ocr/types';
 import { processFurigana } from './lib/ocr/ruby';
 import { arrange, type LaidOutLine } from './lib/ocr/layout';
@@ -102,13 +102,15 @@ interface Page {
   sections: string[][] | null;
   /** User-drawn section boxes (rotatable), applied on top of the other sections, newest last. */
   areas: Area[];
+  /** Keys of the lines read from each box (their characters are cut out of every other line). */
+  areaReads: Map<string, Set<string>>;
   seq: number;
   /** The user edited the text by hand: stop overwriting it with OCR results. */
   edited: boolean;
   error: string | null;
   phase: NonNullable<Scan['progress']>['phase'];
 }
-const freshPage = (): Page => ({ session: null, extra: [], replaced: new Set(), deleted: new Set(), sections: null, areas: [], seq: 0, edited: false, error: null, phase: 'models' });
+const freshPage = (): Page => ({ session: null, extra: [], replaced: new Set(), deleted: new Set(), sections: null, areas: [], areaReads: new Map(), seq: 0, edited: false, error: null, phase: 'models' });
 let page: Page = freshPage();
 /** Photos whose orientation was already checked (so manual rotation isn't undone). */
 const checkedOrientation = new WeakSet<HTMLCanvasElement>();
@@ -194,15 +196,31 @@ function checkRuby(lines: OcrLine[]): OcrLine[] {
   return out;
 }
 
+/** Manual sections, with the pieces of lines cut by a section box in place of the line. */
+function withPieces(sections: string[][] | null, lines: OcrLine[]): string[][] | null {
+  if (!sections) return null;
+  const pieces = new Map<string, string[]>();
+  for (const l of lines) {
+    const k = l.key!, cut = k.indexOf('~');
+    if (cut > 0) pieces.set(k.slice(0, cut), [...(pieces.get(k.slice(0, cut)) ?? []), k]);
+  }
+  return sections.map((g) => g.flatMap((k) => [k, ...(pieces.get(k) ?? [])]));
+}
+
 /** Recomputes the page (text, furigana, sections, pending lines) from OCR results and edits. */
 export function rebuild() {
   const s = scan.value;
   if (!s?.canvas || page.edited) return;
   const sess = page.session;
   const fromSession = sess ? sess.lines.filter((l) => l.result && !page.replaced.has(l.key)).map((l) => l.result!) : [];
-  const all = [...fromSession, ...page.extra].filter((l) => !page.deleted.has(l.key!));
+  let all = [...fromSession, ...page.extra].filter((l) => !page.deleted.has(l.key!));
+  // A box that has been read owns everything inside it: cut its characters out of other lines.
+  for (const a of page.areas) {
+    const own = page.areaReads.get(a.id);
+    if (own) all = all.flatMap((l) => (own.has(l.key!) ? [l] : trimLine(l, (c) => !inArea(a, c))));
+  }
   const processed = checkRuby(processFurigana(all, settings.value.display.furigana));
-  let lines = arrange(processed, page.sections);
+  let lines = arrange(processed, withPieces(page.sections, processed));
   const areaInfo: Scan['areas'] = [];
   if (page.areas.length) {
     const groups: string[][] = [];
@@ -210,7 +228,7 @@ export function rebuild() {
     lines = arrange(processed, applyAreas(groups.filter(Boolean), processed, page.areas));
     for (const a of page.areas) {
       const mine = (lines as LaidOutLine[]).filter((l) => inArea(a, quadCentre(l.quad)));
-      areaInfo.push({ ...a, section: mine.length ? (mine[0] as LaidOutLine).block : -1, count: mine.length });
+      areaInfo.push({ ...a, section: mine.length ? (mine[0] as LaidOutLine).block : -1, count: mine.length, reading: areaJobs.has(a.id) });
     }
   }
   const pending = sess ? sess.lines.filter((l) => l.status !== 'done' && !page.replaced.has(l.key)).map((l) => ({ key: l.key, quad: l.geom.quad, busy: l.status === 'busy' })) : [];
@@ -224,7 +242,7 @@ export function rebuild() {
     areas: areaInfo,
     error: page.error,
   });
-  if (phase === 'done' && !lines.length && !s.busy) showToast('No text found. Try ⬚ Area around the text, or retake the photo closer.', 'info');
+  if (phase === 'done' && !lines.length && !s.busy) showToast('No text found', 'info');
 }
 
 // --- PDFs ---------------------------------------------------------------------------------
@@ -560,7 +578,7 @@ function sectionRect(lines: OcrLine[], W: number, H: number): Rect | null {
 
 export function resetSections() {
   page.sections = null;
-  page.areas = [];
+  for (const a of [...page.areas]) dropArea(a.id);
   page.deleted.clear();
   rebuild();
 }
@@ -568,46 +586,90 @@ export function resetSections() {
 // --- Area (section box) actions --------------------------------------------------------------
 
 /**
- * Creates a section box from a drawn rectangle. Older boxes it mostly covers are replaced.
- * When no text was found inside, the box is read first. Returns the new box.
+ * Creates a section box from a drawn rectangle; it replaces every older box it touches.
+ * The box is read on its own right away (in the background; the box is usable meanwhile).
  */
 export function createArea(rect: Rect): { area: Area; reading: Promise<void> } {
   const a: Area = { id: `u${++page.seq}`, cx: rect.x + rect.w / 2, cy: rect.y + rect.h / 2, w: rect.w, h: rect.h, angle: 0 };
-  // A new box replaces every older box it touches.
-  page.areas = page.areas.filter((o) => !areasIntersect(o, a));
+  for (const o of page.areas) if (areasIntersect(o, a)) dropArea(o.id);
   page.areas.push(a);
-  rebuild();
-  const s = scan.value;
-  const has = (s?.lines ?? []).some((l) => inArea(a, quadCentre(l.quad))) || (s?.pending ?? []).some((p) => inArea(a, quadCentre(p.quad)));
-  // Nothing detected inside: read the box (in the background; the box is usable right away).
-  const reading = has ? Promise.resolve() : runOcr(rect).then(() => rebuild());
-  return { area: a, reading };
+  return { area: a, reading: readArea(a.id) };
 }
 
-/** Moves / stretches / rotates a section box. */
+/** Moves / stretches / rotates a section box, and reads it again. */
 export function updateArea(id: string, geom: Omit<Area, 'id'>) {
   page.areas = page.areas.map((a) => (a.id === id ? { ...geom, id } : a));
   // A box dragged over older boxes replaces them.
   const me = page.areas.find((a) => a.id === id);
   // Dragged mostly over another box: that one goes (a slight touch while stretching doesn't).
-  if (me) page.areas = page.areas.filter((o) => o.id === id || (areaOverlap(o, me) < 0.3 && areaOverlap(me, o) < 0.3));
-  rebuild();
+  if (me) for (const o of page.areas) if (o.id !== id && (areaOverlap(o, me) >= 0.3 || areaOverlap(me, o) >= 0.3)) dropArea(o.id);
+  void readArea(id);
 }
 
 export function deleteArea(id: string) {
-  page.areas = page.areas.filter((a) => a.id !== id);
+  dropArea(id);
   rebuild();
 }
 
-/** Reads a section box again (its bounding rectangle). */
-export async function rereadArea(id: string) {
-  const a = page.areas.find((x) => x.id === id);
-  const s = scan.value;
-  if (!a || !s?.canvas) return;
-  const xs = areaCorners(a).map((p) => p.x), ys = areaCorners(a).map((p) => p.y);
-  const x = Math.max(0, Math.min(...xs)), y = Math.max(0, Math.min(...ys));
-  await runOcr({ x, y, w: Math.min(s.canvas.width, Math.max(...xs)) - x, h: Math.min(s.canvas.height, Math.max(...ys)) - y });
+/** Removes a box and the lines read from it (the text under it comes back). */
+function dropArea(id: string) {
+  page.areas = page.areas.filter((a) => a.id !== id);
+  const r = page.areaReads.get(id);
+  if (r) page.extra = page.extra.filter((l) => !r.has(l.key!));
+  page.areaReads.delete(id);
 }
+
+const areaJobs = new Map<string, Promise<void>>();
+const areaDirty = new Set<string>();
+
+/**
+ * Reads a section box on its own (its bounding rectangle, keeping only characters inside the
+ * box). Called again while a read is running, it reads once more with the newest geometry.
+ */
+export function readArea(id: string): Promise<void> {
+  const running = areaJobs.get(id);
+  if (running) { areaDirty.add(id); return running; }
+  const pg = page;
+  const job = (async () => {
+    await Promise.resolve(); // registered in areaJobs before the first rebuild
+    try {
+      do {
+        areaDirty.delete(id);
+        const a = pg.areas.find((x) => x.id === id);
+        const s = scan.value;
+        if (!a || !s?.canvas || page !== pg) return;
+        rebuild(); // shows the box as being read
+        // Read a little beyond the box so characters on its edge are seen whole; only those whose
+        // centre is inside the box are kept.
+        const pad = Math.min(60, Math.max(12, Math.min(a.w, a.h) * 0.3));
+        const xs = areaCorners(a).map((p) => p.x), ys = areaCorners(a).map((p) => p.y);
+        const x = Math.max(0, Math.floor(Math.min(...xs) - pad)), y = Math.max(0, Math.floor(Math.min(...ys) - pad));
+        const rect = { x, y, w: Math.min(s.canvas.width, Math.ceil(Math.max(...xs) + pad)) - x, h: Math.min(s.canvas.height, Math.ceil(Math.max(...ys) + pad)) - y };
+        if (rect.w < 4 || rect.h < 4) return;
+        await ensureOcrEngine();
+        const res = await recognize(s.canvas, rect, settings.value.ocr);
+        const cur = pg.areas.find((x) => x.id === id);
+        if (!cur || page !== pg) return;
+        if (areaDirty.has(id)) continue; // moved meanwhile: read the new place
+        const tag = `a${++pg.seq}_`;
+        const found = res.lines.flatMap((l, i) => trimLine({ ...l, key: tag + i }, (c) => inArea(cur, c)));
+        const prev = pg.areaReads.get(id);
+        pg.extra = [...pg.extra.filter((l) => !prev?.has(l.key!)), ...found];
+        pg.areaReads.set(id, new Set(found.map((l) => l.key!)));
+      } while (areaDirty.has(id));
+    } catch (e) {
+      showToast(String((e as Error)?.message ?? e), 'error');
+    } finally {
+      areaJobs.delete(id);
+      if (page === pg) rebuild();
+    }
+  })();
+  areaJobs.set(id, job);
+  return job;
+}
+
+/** Reads a section box again. */
+export const rereadArea = readArea;
 
 export async function rotateScan() {
   const s = scan.value;

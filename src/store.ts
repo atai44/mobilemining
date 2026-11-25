@@ -28,7 +28,7 @@ export interface Scan {
   /** User-drawn section boxes: geometry, section number they produce, and how many lines they hold. */
   /** Page of a PDF being read. */
   doc?: { page: number; pages: number };
-  areas: { id: string; cx: number; cy: number; w: number; h: number; angle: number; section: number; count: number }[];
+  areas: { id: string; cx: number; cy: number; w: number; h: number; angle: number; section: number; count: number; reading: boolean }[];
   busy: boolean;
   error: string | null;
   timing?: number;
@@ -90,20 +90,56 @@ export function textFromLines(lines: (OcrLine & { sep?: string })[]): Pick<Scan,
 
 /** Outline of each character on the photo, from the line's quad and the characters' positions along it. */
 export function charCells(l: OcrLine): number[][] {
+  const P = linePoint(l);
+  return charSpans(l).map(([a0, a1]) => [...P(a0, 0), ...P(a1, 0), ...P(a1, 1), ...P(a0, 1)]);
+}
+
+/** Point at (along, across) ∈ [0,1]² in a line's quad. */
+export function linePoint(l: OcrLine) {
+  const [q0, q1, , q3] = l.quad;
+  return (a: number, b: number) => [q0.x + a * (q1.x - q0.x) + b * (q3.x - q0.x), q0.y + a * (q1.y - q0.y) + b * (q3.y - q0.y)];
+}
+
+/** Where each character starts and ends along its line (0..1). */
+export function charSpans(l: OcrLine): [number, number][] {
   const n = l.chars.length;
   if (!n) return [];
   const us = l.chars.map((c, i) => c.u ?? (i + 0.5) / n);
   const [q0, q1, , q3] = l.quad;
-  const P = (a: number, b: number) => [q0.x + a * (q1.x - q0.x) + b * (q3.x - q0.x), q0.y + a * (q1.y - q0.y) + b * (q3.y - q0.y)];
   const len = Math.hypot(q1.x - q0.x, q1.y - q0.y) || 1;
   const thick = Math.hypot(q3.x - q0.x, q3.y - q0.y);
   // Half a character (≈ half the line thickness) on each side when there is no neighbour.
   const half = Math.min(0.5, (thick * 0.5) / len);
-  return us.map((u, i) => {
-    const a0 = i > 0 ? (us[i - 1] + u) / 2 : Math.max(0, u - half);
-    const a1 = i < n - 1 ? (u + us[i + 1]) / 2 : Math.min(1, u + half);
-    return [...P(a0, 0), ...P(a1, 0), ...P(a1, 1), ...P(a0, 1)];
-  });
+  return us.map((u, i) => [i > 0 ? (us[i - 1] + u) / 2 : Math.max(0, u - half), i < n - 1 ? (u + us[i + 1]) / 2 : Math.min(1, u + half)]);
+}
+
+/**
+ * The parts of a line whose characters pass `keep` (tested at each character's centre), as
+ * separate lines. Used to cut a section box's characters out of the lines it overlaps.
+ */
+export function trimLine(l: OcrLine, keep: (p: { x: number; y: number }) => boolean): OcrLine[] {
+  const spans = charSpans(l);
+  const P = linePoint(l);
+  const flags = spans.map(([a0, a1]) => { const [x, y] = P((a0 + a1) / 2, 0.5); return keep({ x, y }); });
+  if (flags.every(Boolean)) return [l];
+  const out: OcrLine[] = [];
+  for (let i = 0; i < flags.length; ) {
+    if (!flags[i]) { i++; continue; }
+    let j = i;
+    while (j < flags.length && flags[j]) j++;
+    const a0 = spans[i][0], a1 = spans[j - 1][1], span = Math.max(a1 - a0, 1e-6);
+    const pt = (a: number, b: number) => { const [x, y] = P(a, b); return { x, y }; };
+    const quad: OcrLine['quad'] = [pt(a0, 0), pt(a1, 0), pt(a1, 1), pt(a0, 1)];
+    const xs = quad.map((q) => q.x), ys = quad.map((q) => q.y);
+    const chars = l.chars.slice(i, j).map((c, k) => ({ ...c, u: ((c.u ?? (i + k + 0.5) / l.chars.length) - a0) / span }));
+    out.push({
+      ...l, key: `${l.key}~${out.length}`, chars, text: chars.map((c) => c.c).join(''), quad,
+      box: { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) },
+      mid: [pt(a0, 0.5), pt(a1, 0.5)], ruby: undefined,
+    });
+    i = j;
+  }
+  return out;
 }
 
 /** Stable position of a character: its line's key and offset, which survive background updates. */

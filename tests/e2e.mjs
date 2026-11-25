@@ -325,46 +325,48 @@ for (const fx of ['dense-vertical.png', 'dense-vertical-tilt.png', 'dense-horizo
   check((await count()) >= 4, 're-reading a section with a forced direction');
   await page.click('[data-testid=sec-reset]');
 
-  // ⬚ Area: a box drawn around text becomes its own section
+  // ⬚ Area: a box drawn around text becomes its own section, read on its own
   await page.click('.section-bar >> text=Done');
   const capBox = await page.$$eval('[data-testid=image-reader] polygon.line-box', (els) => {
     const rs = els.map((e) => e.getBoundingClientRect()).filter((r) => r.width > r.height * 3);
     const r = rs.sort((a, b) => b.bottom - a.bottom)[0]; // the caption row
-    return { x0: r.x + r.width * 0.55, y0: r.y - 4, x1: r.right + 4, y1: r.bottom + 4 };
+    return { x0: r.x + r.width * 0.55, y0: r.y - 4, x1: r.right + 4, y1: r.bottom + 4, left: r.x };
   });
-  await page.click('[data-testid=select-area]');
-  await page.mouse.move(capBox.x0, capBox.y0);
-  await page.mouse.down();
-  await page.mouse.move(capBox.x1, capBox.y1, { steps: 6 });
-  await page.mouse.up();
-  await page.waitForTimeout(400);
-  await page.click('[data-testid=sections]');
-  for (let i = 0; i < 15 && (await count()) !== 5; i++) await page.waitForTimeout(200);
-  check((await count()) === 5, `area box becomes its own section (${await count()} sections)`);
-  await page.click('.section-bar >> text=Done');
-  // the box stays visible and selected; drawing a bigger box over it replaces it
-  check((await page.$$('[data-area]')).length === 1 && !!(await page.$('[data-testid=area-bar]')), 'new section box is shown and selected');
-  const areaText = await page.$eval('[data-testid=area-text]', (e) => e.textContent).catch(() => '');
-  check(/写真|二〇二四/.test(areaText), `section box shows its text (${areaText})`);
-  await page.click('[data-testid=select-area]');
-  await page.mouse.move(capBox.x0 - 30, capBox.y0 - 6);
-  await page.mouse.down();
-  await page.mouse.move(capBox.x1 + 6, capBox.y1 + 6, { steps: 6 });
-  await page.mouse.up();
-  await page.waitForTimeout(400);
-  check((await page.$$('[data-area]')).length === 1, 'a box drawn over an existing box replaces it');
+  const drawBox = async (x0, y0, x1, y1) => {
+    await page.click('[data-testid=select-area]');
+    await page.mouse.move(x0, y0);
+    await page.mouse.down();
+    await page.mouse.move(x1, y1, { steps: 6 });
+    await page.mouse.up();
+  };
+  const areaRead = async () => {
+    await page.waitForFunction(() => { const t = document.querySelector('[data-testid=area-text]'); return t && !t.hasAttribute('data-reading'); }, null, { timeout: 60_000 });
+    return page.$eval('[data-testid=area-text]', (e) => e.textContent);
+  };
+  const boxes = () => page.$eval('[data-testid=image-reader] svg.overlay', (e) => Number(e.dataset.areas));
+  await drawBox(capBox.x0, capBox.y0, capBox.x1, capBox.y1);
+  const t1 = await areaRead();
+  check((await page.$$('[data-area]')).length === 1 && /二〇二四/.test(t1) && !/写真/.test(t1), `new section box is shown, selected and read (${t1})`);
+  await page.click('[data-testid=show-text]');
+  const partial = await readerText();
+  await toImage();
+  check(partial.split('二〇二四').length === 2 && partial.split('様').length === 2 && partial.split('子').length === 2 && partial.includes('写真：東京駅'), `a box over part of a line takes those characters out of it (${partial.split('\n').slice(-3).join('/')})`);
+  // drawing a bigger box over it replaces it
+  await drawBox(capBox.x0 - 30, capBox.y0 - 6, capBox.x1 + 6, capBox.y1 + 6);
+  await areaRead();
+  check((await boxes()) === 1, 'a box drawn over an existing box replaces it');
   const areaW = () => page.$eval('[data-area] polygon.area-box', (e) => e.getBoundingClientRect().width);
   const before = await areaW();
-  // stretch: drag the left edge to the left end of the caption
+  // stretch: drag the left edge to the left end of the caption; the box is read again by itself
   const left = await page.$eval('[data-handle="edge-10"]', (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
   await page.mouse.move(left.x, left.y);
   await page.mouse.down();
-  await page.mouse.move(capBox.x0 - (capBox.x1 - capBox.x0) * 1.3, left.y, { steps: 6 });
+  await page.mouse.move(capBox.left - 8, left.y, { steps: 6 });
   await page.mouse.up();
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
+  const t2 = await areaRead();
   const after = await areaW();
-  const bar = await page.$eval('[data-testid=area-bar]', (e) => e.innerText);
-  check(after > before * 1.5 && /2 lines/.test(bar), `stretching a box (${before.toFixed(0)} → ${after.toFixed(0)}px; ${bar.split('—')[0].trim()})`);
+  check(after > before * 1.5 && /写真/.test(t2) && /二〇二四/.test(t2), `stretching a box re-reads it (${before.toFixed(0)} → ${after.toFixed(0)}px; ${t2})`);
   // rotate with the knob
   const knob = await page.$eval('[data-handle=rotate]', (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
   const mv = await page.$eval('[data-handle=move]', (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
@@ -376,9 +378,22 @@ for (const fx of ['dense-vertical.png', 'dense-vertical-tilt.png', 'dense-horizo
   const pts = await page.$eval('[data-area] polygon.area-box', (e) => e.getAttribute('points'));
   const ys = pts.split(' ').map((p) => Number(p.split(',')[1]));
   check(Math.abs(ys[0] - ys[1]) > 3, 'rotating a box with the knob');
+  await areaRead();
   await page.click('[data-testid=area-delete]');
   await page.waitForTimeout(200);
-  check((await page.$$('[data-area]')).length === 0, 'removing a box');
+  check((await boxes()) === 0 && !(await page.$('[data-testid=area-bar]')), 'removing a box');
+  // a box over the whole caption; once put away it is a section like the others
+  await drawBox(capBox.left - 8, capBox.y0 - 6, capBox.x1 + 6, capBox.y1 + 6);
+  await areaRead();
+  await page.click('[data-testid=show-text]');
+  const shown = await readerText();
+  await toImage();
+  check((await boxes()) === 1 && (await page.$$('[data-area]')).length === 0 && !(await page.$('[data-testid=area-bar]')), 'box handles go away when using something else');
+  check(shown.split('東京駅').length === 2, `text under a box isn't duplicated (${shown.replace(/\n/g, '/')})`);
+  await page.click('[data-testid=sections]');
+  check((await count()) === 4, `box over the caption is its section (${await count()} sections)`);
+  await page.click('[data-testid=sec-reset]');
+  await page.click('.section-bar >> text=Done');
   await page.click('[data-testid=sections]');
   await pickSection(3);
   await page.click('[data-testid=sec-reread]');
@@ -515,7 +530,8 @@ await shot('08b-zoomed');
   await page.click('[data-testid=select-area]');
   await page.mouse.move(old.x - 20, old.y - 20); await page.mouse.down(); await page.mouse.move(old.x + 120, old.y + 140, { steps: 5 }); await page.mouse.up();
   await page.waitForTimeout(400);
-  check((await page.$$('[data-area]')).length === 1, `a new box replaces an older box it only partly covers (${(await page.$$('[data-area]')).length} box)`);
+  const nBoxes = () => page.$eval('[data-testid=image-reader] svg.overlay', (e) => Number(e.dataset.areas));
+  check((await nBoxes()) === 1, `a new box replaces an older box it only partly covers (${await nBoxes()} box)`);
   const h = await page.$eval('[data-handle="edge-10"]', (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
   const wa = await w();
   await page.mouse.move(h.x, h.y); await page.mouse.down(); await page.mouse.move(h.x - 50, h.y, { steps: 4 }); await page.mouse.up();
@@ -534,7 +550,7 @@ await shot('08b-zoomed');
     await page.mouse.move(z.x + 20, z.y + 20); await page.mouse.down(); await page.mouse.move(z.x + 180, z.y + 160, { steps: 6 }); await page.mouse.up();
     await page.waitForTimeout(400);
     const after = await ids();
-    check(!!smallId && after.length === 1 && after[0] !== smallId, `drawing over a small selected box replaces it (${smallId} → ${after.join(', ')})`);
+    check(!!smallId && after.length === 1 && after[0] !== smallId && (await nBoxes()) === 1, `drawing over a small selected box replaces it (${smallId} → ${after.join(', ')})`);
   }
   await page.click('[data-testid=area-delete]');
   await cdp.detach();
