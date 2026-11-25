@@ -92,6 +92,13 @@ checks. No AnkiConnect, no import step.
   stays on the device, and backups from the web version can be restored in the app.
 - Files the app creates (backup, `.apkg`, TSV) are handed to Android's share sheet.
 
+- AnkiConnect also works from the app, without the browser's limits: AnkiConnect Android on the phone, or Anki on a
+  computer on the same Wi-Fi (URL `http://<computer-ip>:8765`, AnkiConnect's `webBindAddress` set to `0.0.0.0`).
+
+How it was tested: the AnkiDroid code (`AnkiDroidBridge`) has an instrumented test that runs on a device against a
+real AnkiDroid (`adb shell pm grant io.github.atai44.mobilemining com.ichi2.anki.permission.READ_WRITE_DATABASE`, then
+`./gradlew :app:connectedDebugAndroidTest`); the JavaScript side runs in the e2e suite against a mocked native bridge.
+
 Building it yourself: `npm run build && npx cap sync android && (cd android && ./gradlew assembleRelease)` with JDK 21
 and the Android SDK. The native part is small: `android/app/src/main/java/.../AnkiDroidPlugin.java` (AnkiDroid's API)
 and `src/lib/native.ts` (its JavaScript side). The APK is signed with `android/app/sideload.keystore`, a key kept in

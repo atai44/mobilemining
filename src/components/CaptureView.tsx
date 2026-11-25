@@ -109,8 +109,7 @@ function DictionaryCard() {
   const [progress, setProgress] = useState<{ stage: string; done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const d = dicts.value;
-  if (d === null) return null;
-  const installed = !!d.jmdict;
+  const installed = !!d?.jmdict;
 
   const install = async () => {
     setError(null);
@@ -126,7 +125,10 @@ function DictionaryCard() {
     }
   };
 
-  if (installed && !progress) return null;
+  // In the Android app the dictionary files are inside the APK: import them right away.
+  useEffect(() => { if (isNative() && d !== null && !installed && !progress && !error) install(); }, [d === null, installed]);
+
+  if (d === null || (installed && !progress)) return null;
   return (
     <div class="card notice">
       <h2>Dictionary</h2>
@@ -165,7 +167,7 @@ function OcrCard() {
         </div>
         {s.state === 'idle' && (
           <button class="button small" onClick={() => ensureOcrEngine().catch(() => {})}>
-            Get · 31 MB
+            {isNative() ? 'Load' : 'Get · 31 MB'}
           </button>
         )}
         {s.state === 'ready' && <span class="badge ok">✓</span>}

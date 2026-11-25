@@ -8,7 +8,7 @@ import { ankiFurigana, escapeHtml, furiganaSegments, rubyHtml, toHiragana } from
 import type { Definition, TermResult } from './lookup';
 import type { MinedNote } from './db';
 import type { Settings } from './settings';
-import { AnkiDroidClient, isNative } from './native';
+import { AnkiDroidClient, isNative, nativePostJson } from './native';
 import { glossaryText, renderGlossaryItem } from './yomitan/render';
 import { getMedia } from './yomitan/query';
 import { downstepPosition, pitchCategory, pitchHtml } from './pitch';
@@ -282,18 +282,27 @@ export class AnkiConnect {
   constructor(private url: string, private key: string) {}
 
   async invoke<T>(action: string, params: Record<string, unknown> = {}): Promise<T> {
+    const body = { action, version: 6, params, ...(this.key ? { key: this.key } : {}) };
+    let json: { result: T; error: string | null };
+    if (isNative()) {
+      // The app talks to AnkiConnect natively: no CORS, and Anki on another machine (Wi-Fi) works.
+      try {
+        json = await nativePostJson(this.url, body) as { result: T; error: string | null };
+      } catch {
+        throw new Error(`Could not reach AnkiConnect at ${this.url}. Is Anki running with AnkiConnect installed?`);
+      }
+      if (json.error) throw new Error(`AnkiConnect: ${json.error}`);
+      return json.result;
+    }
     let res: Response;
     try {
-      res = await fetch(this.url, {
-        method: 'POST',
-        body: JSON.stringify({ action, version: 6, params, ...(this.key ? { key: this.key } : {}) }),
-      });
+      res = await fetch(this.url, { method: 'POST', body: JSON.stringify(body) });
     } catch {
       throw new Error(
         `Could not reach AnkiConnect at ${this.url}. Is Anki running with AnkiConnect installed, and is this site's origin (${location.origin}) in AnkiConnect's webCorsOriginList?`,
       );
     }
-    const json = (await res.json()) as { result: T; error: string | null };
+    json = (await res.json()) as { result: T; error: string | null };
     if (json.error) throw new Error(`AnkiConnect: ${json.error}`);
     return json.result;
   }

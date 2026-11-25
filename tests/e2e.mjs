@@ -728,7 +728,11 @@ await shot('09-mined');
         open: () => ({}),
       },
       // 読む has a recording; everything else gets the "not available" clip (52,288 bytes)
-      CapacitorHttp: { get: ({ url }) => ({ status: 200, headers: {}, data: btoa('x'.repeat(decodeURIComponent(url).includes('読む') ? 3000 : 52288)) }) },
+      CapacitorHttp: {
+        get: ({ url }) => ({ status: 200, headers: {}, data: btoa('x'.repeat(decodeURIComponent(url).includes('読む') ? 3000 : 52288)) }),
+        // native HTTP stands in for fetch (here it reaches the mocked AnkiConnect)
+        post: async ({ url, data }) => { const r = await fetch(url, { method: 'POST', body: JSON.stringify(data) }); return { status: r.status, headers: {}, data: await r.json() }; },
+      },
     };
     window.Capacitor = {
       PluginHeaders: Object.entries(impl).map(([name, m]) => ({ name, methods: Object.keys(m).map((n) => ({ name: n, rtype: 'promise' })) })),
@@ -769,6 +773,13 @@ await shot('09-mined');
   await page.waitForFunction(() => window.__native.filter(([, m]) => m === 'addNote').length === 2, null, { timeout: 20_000 });
   const after = await page.evaluate(() => [window.__native.filter(([, m, o]) => m === 'addMedia' && o.kind === 'audio').length, window.__native.filter(([, m]) => m === 'addNote').at(-1)[2].fields.ExpressionAudio]);
   check(after[0] === before && after[1] === '', `app: the "not available" clip is not added as audio (${JSON.stringify(after)})`);
+  // AnkiConnect in the app goes through native HTTP
+  await tab('Settings');
+  await page.click('.segmented >> text=AnkiConnect');
+  await page.waitForFunction(() => window.__native.some(([p, m, o]) => p === 'CapacitorHttp' && m === 'post' && o.data.action === 'modelNames'), null, { timeout: 15_000 }).catch(() => {});
+  await page.waitForSelector('.conn-ok', { timeout: 15_000 }).catch(() => {});
+  const posts = await page.evaluate(() => window.__native.filter(([p, m, o]) => p === 'CapacitorHttp' && m === 'post').map(([, , o]) => o.data.action));
+  check(!!(await page.$('.conn-ok')) && posts.includes('version') && posts.includes('deckNames'), `app: AnkiConnect through native HTTP (${[...new Set(posts)].join(', ')})`);
 }
 
 await browser.close();

@@ -110,6 +110,13 @@ export class AnkiDroidClient {
   async guiEditNote(_note: number): Promise<null> { await AnkiDroid.open(); return null; }
 }
 
+/** POSTs JSON with the app's native HTTP client (no CORS, plain http allowed). */
+export async function nativePostJson(url: string, body: unknown): Promise<unknown> {
+  const res = await CapacitorHttp.post({ url, headers: { 'Content-Type': 'application/json' }, data: body, connectTimeout: 8000, readTimeout: 60000 });
+  if (res.status < 200 || res.status >= 300) throw new Error(`HTTP ${res.status}`);
+  return typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+}
+
 // --- Files ---------------------------------------------------------------------------------
 
 async function base64(blob: Blob): Promise<string> {

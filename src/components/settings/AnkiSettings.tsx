@@ -114,7 +114,8 @@ export function AnkiSettings() {
             </button>
           </div>
           {conn.state === 'error' && droid && <p class="muted small">Needs AnkiDroid installed and opened once. If Connect shows no prompt, reinstall this app (it must be installed after AnkiDroid).</p>}
-          {conn.state === 'error' && !droid && (
+          {conn.state === 'error' && !droid && native && <p class="muted small">AnkiConnect Android on this phone, or Anki on a computer on the same Wi-Fi: set the URL to http://computer-ip:8765 and AnkiConnect's webBindAddress to 0.0.0.0.</p>}
+          {conn.state === 'error' && !droid && !native && (
             <details class="small help" open>
               <summary>Help</summary>
               <ol>
