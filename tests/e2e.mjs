@@ -486,6 +486,18 @@ await shot('08b-zoomed');
   await page.waitForTimeout(250);
   const [s1, w1] = [await sc(), await w()];
   check(w1 > w0 + 40 && s0 === s1, `one-finger touch drags a box handle without scrolling (${w0.toFixed(0)} → ${w1.toFixed(0)}px, scroll ${s0} → ${s1})`);
+  // A new box that only partly overlaps an existing one still replaces it, and its handles work
+  const old = await page.$eval('[data-area] polygon.area-box', (e) => { const r = e.getBoundingClientRect(); return { x: r.right, y: r.bottom }; });
+  await page.click('[data-testid=area-bar] >> text=Done');
+  await page.click('[data-testid=select-area]');
+  await page.mouse.move(old.x - 20, old.y - 20); await page.mouse.down(); await page.mouse.move(old.x + 120, old.y + 140, { steps: 5 }); await page.mouse.up();
+  await page.waitForTimeout(400);
+  check((await page.$$('[data-area]')).length === 1, `a new box replaces an older box it only partly covers (${(await page.$$('[data-area]')).length} box)`);
+  const h = await page.$eval('[data-handle="edge-10"]', (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  const wa = await w();
+  await page.mouse.move(h.x, h.y); await page.mouse.down(); await page.mouse.move(h.x - 50, h.y, { steps: 4 }); await page.mouse.up();
+  await page.waitForTimeout(250);
+  check((await w()) > wa + 30, 'the new box\'s handles respond');
   await page.click('[data-testid=area-delete]');
   await cdp.detach();
 }

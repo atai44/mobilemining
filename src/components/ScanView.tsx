@@ -267,10 +267,11 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
     if (rect.w > 12 && rect.h > 12) {
       setDraw(null);
       // The box becomes its own section (reading the area first if no text was found in it).
-      createArea(rect).then((a) => {
-        setSelArea(a.id);
-        setFlash(a.id);
-        setTimeout(() => setFlash((f) => (f === a.id ? null : f)), 1400);
+      const { area: a, reading } = createArea(rect);
+      setSelArea(a.id);
+      setFlash(a.id);
+      setTimeout(() => setFlash((f) => (f === a.id ? null : f)), 1400);
+      reading.then(() => {
         const info = scan.value?.areas.find((x) => x.id === a.id);
         showToast(info && info.count ? `Section ${info.section + 1} · ${info.count} line${info.count === 1 ? '' : 's'}` : 'No text found in that box', info?.count ? 'ok' : 'info');
       });
@@ -504,7 +505,8 @@ function AreaLayer({ svgRef, W, selected, flash, onSelect }: {
   const handlers = { onPointerMove: move, onPointerUp: end, onPointerCancel: () => { drag.current = null; setLive(null); } };
   return (
     <g class="areas">
-      {s.areas.map((info) => {
+      {/* The selected box is drawn last, so nothing else can sit on top of its handles. */}
+      {[...s.areas.filter((x) => x.id !== selected), ...s.areas.filter((x) => x.id === selected)].map((info) => {
         const a = live?.id === info.id ? { ...info, ...live.geom } : info;
         const pts = areaCorners({ ...a, id: a.id });
         const color = SECTION_COLORS[Math.max(0, info.section) % SECTION_COLORS.length];

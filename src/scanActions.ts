@@ -4,6 +4,8 @@ import type { OcrLine, Orientation, Point } from './lib/ocr/types';
 import { processFurigana } from './lib/ocr/ruby';
 import { arrange, type LaidOutLine } from './lib/ocr/layout';
 import { OcrSession, pointInQuad } from './lib/ocr/session';
+import { areaCorners, areaOverlap, areasIntersect, inArea, quadCentre, type Area } from './lib/areas';
+export { areaCorners, areasIntersect, inArea, type Area };
 import { lookupPrefix } from './lib/db';
 import { checkFurigana, type FuriganaCheck } from './lib/rubyCheck';
 import { dicts } from './store';
@@ -64,42 +66,6 @@ function setScan(patch: Partial<Scan>) {
 }
 
 // --- User-drawn section boxes -----------------------------------------------------------------
-
-export interface Area { id: string; cx: number; cy: number; w: number; h: number; angle: number }
-
-/** Is point p inside the (rotated) area? */
-export function inArea(a: Area, p: Point): boolean {
-  const dx = p.x - a.cx, dy = p.y - a.cy;
-  const c = Math.cos(-a.angle), s = Math.sin(-a.angle);
-  const x = dx * c - dy * s, y = dx * s + dy * c;
-  return Math.abs(x) <= a.w / 2 && Math.abs(y) <= a.h / 2;
-}
-
-export function areaCorners(a: Area): Point[] {
-  const c = Math.cos(a.angle), s = Math.sin(a.angle);
-  return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, v]) => ({
-    x: a.cx + (u * a.w / 2) * c - (v * a.h / 2) * s,
-    y: a.cy + (u * a.w / 2) * s + (v * a.h / 2) * c,
-  }));
-}
-
-const quadCentre = (q: Point[]) => ({ x: (q[0].x + q[1].x + q[2].x + q[3].x) / 4, y: (q[0].y + q[1].y + q[2].y + q[3].y) / 4 });
-
-/** Fraction of `a` covered by `b` (sampled). */
-function areaOverlap(a: Area, b: Area): number {
-  const pts = areaCorners(a);
-  let hit = 0, n = 0;
-  for (let i = 0; i <= 6; i++) for (let j = 0; j <= 6; j++) {
-    const u = i / 6, v = j / 6;
-    const p = {
-      x: pts[0].x + u * (pts[1].x - pts[0].x) + v * (pts[3].x - pts[0].x),
-      y: pts[0].y + u * (pts[1].y - pts[0].y) + v * (pts[3].y - pts[0].y),
-    };
-    n++;
-    if (inArea(b, p)) hit++;
-  }
-  return hit / n;
-}
 
 /**
  * Applies user boxes to section groups: each box's lines leave their groups and form a section
@@ -570,15 +536,17 @@ export function resetSections() {
  * Creates a section box from a drawn rectangle. Older boxes it mostly covers are replaced.
  * When no text was found inside, the box is read first. Returns the new box.
  */
-export async function createArea(rect: Rect): Promise<Area> {
+export function createArea(rect: Rect): { area: Area; reading: Promise<void> } {
   const a: Area = { id: `u${++page.seq}`, cx: rect.x + rect.w / 2, cy: rect.y + rect.h / 2, w: rect.w, h: rect.h, angle: 0 };
-  page.areas = page.areas.filter((o) => areaOverlap(o, a) < 0.5 && areaOverlap(a, o) < 0.5);
+  // A new box replaces every older box it touches.
+  page.areas = page.areas.filter((o) => !areasIntersect(o, a));
   page.areas.push(a);
+  rebuild();
   const s = scan.value;
   const has = (s?.lines ?? []).some((l) => inArea(a, quadCentre(l.quad))) || (s?.pending ?? []).some((p) => inArea(a, quadCentre(p.quad)));
-  if (!has) await runOcr(rect);
-  rebuild();
-  return a;
+  // Nothing detected inside: read the box (in the background; the box is usable right away).
+  const reading = has ? Promise.resolve() : runOcr(rect).then(() => rebuild());
+  return { area: a, reading };
 }
 
 /** Moves / stretches / rotates a section box. */
@@ -586,7 +554,8 @@ export function updateArea(id: string, geom: Omit<Area, 'id'>) {
   page.areas = page.areas.map((a) => (a.id === id ? { ...geom, id } : a));
   // A box dragged over older boxes replaces them.
   const me = page.areas.find((a) => a.id === id);
-  if (me) page.areas = page.areas.filter((o) => o.id === id || (areaOverlap(o, me) < 0.5 && areaOverlap(me, o) < 0.5));
+  // Dragged mostly over another box: that one goes (a slight touch while stretching doesn't).
+  if (me) page.areas = page.areas.filter((o) => o.id === id || (areaOverlap(o, me) < 0.3 && areaOverlap(me, o) < 0.3));
   rebuild();
 }
 

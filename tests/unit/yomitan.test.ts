@@ -239,3 +239,14 @@ describe('furigana dictionary check', () => {
     expect(cleanRubyText('ヴァイオリーン')).toBe('ヴァイオリーン');
   });
 });
+
+import { areasIntersect } from '../../src/lib/areas';
+describe('section boxes', () => {
+  const box = (cx: number, cy: number, w: number, h: number, angle = 0) => ({ id: 'x', cx, cy, w, h, angle });
+  it('detects any overlap between rotated boxes', () => {
+    expect(areasIntersect(box(0, 0, 10, 10), box(9, 0, 10, 10))).toBe(true); // small overlap
+    expect(areasIntersect(box(0, 0, 10, 10), box(11, 0, 10, 10))).toBe(false);
+    expect(areasIntersect(box(0, 0, 10, 10), box(0, 0, 100, 100))).toBe(true); // contained
+    expect(areasIntersect(box(0, 0, 10, 10, Math.PI / 4), box(9.5, 9.5, 10, 10, Math.PI / 4))).toBe(false); // diagonal gap
+  });
+});
