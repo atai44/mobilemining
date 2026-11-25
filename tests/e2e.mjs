@@ -245,8 +245,10 @@ await shot('06-settings-yomitan');
 await page.click('.segmented >> text=AnkiMobile');
 const mob = [await page.$eval('[data-testid=mobile-model]', (e) => e.value), await page.$eval('[data-testid=mobile-note-type] [data-field="MainDefinition"]', (e) => e.value)];
 await page.click('.segmented >> text=Export');
+const lapisHint = await page.$eval('[data-testid=anki-settings]', (e) => e.innerText.includes('Export a “Lapis” card'));
+await page.click('[data-testid=export-format] >> text=TSV');
 const exp = [await page.$eval('[data-testid=export-model]', (e) => e.value), await page.$eval('[data-testid=export-deck]', (e) => e.value)];
-check(mob[0] === 'Lapis' && mob[1] === '{single-glossary-test-dict}' && exp[0] === 'Lapis' && exp[1] === 'Mining', `Yomitan note type used for AnkiMobile and export (${mob.join(', ')}; ${exp.join(', ')})`);
+check(mob[0] === 'Lapis' && mob[1] === '{single-glossary-test-dict}' && exp[0] === 'Lapis' && exp[1] === 'Mining' && lapisHint, `Yomitan note type used for AnkiMobile and export (${mob.join(', ')}; ${exp.join(', ')})`);
 {
   await tab('Mined');
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('text=TSV ↓')]);
