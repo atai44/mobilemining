@@ -8,3 +8,4 @@ test-results/
 *.log
 tests/photos/
 public/pdfjs/
+tests/backup-test.zip
