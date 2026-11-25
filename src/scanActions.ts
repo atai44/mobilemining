@@ -593,6 +593,7 @@ export function createArea(rect: Rect): { area: Area; reading: Promise<void> } {
   const a: Area = { id: `u${++page.seq}`, cx: rect.x + rect.w / 2, cy: rect.y + rect.h / 2, w: rect.w, h: rect.h, angle: 0 };
   for (const o of page.areas) if (areasIntersect(o, a)) dropArea(o.id);
   page.areas.push(a);
+  rebuild();
   return { area: a, reading: readArea(a.id) };
 }
 
@@ -603,6 +604,7 @@ export function updateArea(id: string, geom: Omit<Area, 'id'>) {
   const me = page.areas.find((a) => a.id === id);
   // Dragged mostly over another box: that one goes (a slight touch while stretching doesn't).
   if (me) for (const o of page.areas) if (o.id !== id && (areaOverlap(o, me) >= 0.3 || areaOverlap(me, o) >= 0.3)) dropArea(o.id);
+  rebuild(); // show the new geometry now, even while an earlier read is still running
   void readArea(id);
 }
 
