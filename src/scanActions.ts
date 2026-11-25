@@ -63,6 +63,63 @@ function setScan(patch: Partial<Scan>) {
   if (scan.value) scan.value = { ...scan.value, ...patch };
 }
 
+// --- User-drawn section boxes -----------------------------------------------------------------
+
+export interface Area { id: string; cx: number; cy: number; w: number; h: number; angle: number }
+
+/** Is point p inside the (rotated) area? */
+export function inArea(a: Area, p: Point): boolean {
+  const dx = p.x - a.cx, dy = p.y - a.cy;
+  const c = Math.cos(-a.angle), s = Math.sin(-a.angle);
+  const x = dx * c - dy * s, y = dx * s + dy * c;
+  return Math.abs(x) <= a.w / 2 && Math.abs(y) <= a.h / 2;
+}
+
+export function areaCorners(a: Area): Point[] {
+  const c = Math.cos(a.angle), s = Math.sin(a.angle);
+  return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, v]) => ({
+    x: a.cx + (u * a.w / 2) * c - (v * a.h / 2) * s,
+    y: a.cy + (u * a.w / 2) * s + (v * a.h / 2) * c,
+  }));
+}
+
+const quadCentre = (q: Point[]) => ({ x: (q[0].x + q[1].x + q[2].x + q[3].x) / 4, y: (q[0].y + q[1].y + q[2].y + q[3].y) / 4 });
+
+/** Fraction of `a` covered by `b` (sampled). */
+function areaOverlap(a: Area, b: Area): number {
+  const pts = areaCorners(a);
+  let hit = 0, n = 0;
+  for (let i = 0; i <= 6; i++) for (let j = 0; j <= 6; j++) {
+    const u = i / 6, v = j / 6;
+    const p = {
+      x: pts[0].x + u * (pts[1].x - pts[0].x) + v * (pts[3].x - pts[0].x),
+      y: pts[0].y + u * (pts[1].y - pts[0].y) + v * (pts[3].y - pts[0].y),
+    };
+    n++;
+    if (inArea(b, p)) hit++;
+  }
+  return hit / n;
+}
+
+/**
+ * Applies user boxes to section groups: each box's lines leave their groups and form a section
+ * where its first line was in the reading order. Newer boxes win.
+ */
+function applyAreas(groups: string[][], lines: OcrLine[], areas: Area[]): string[][] {
+  let out = groups.map((g) => [...g]);
+  const centre = new Map(lines.map((l) => [l.key!, quadCentre(l.quad)]));
+  for (const a of areas) {
+    const keys = [...centre.entries()].filter(([, c]) => inArea(a, c)).map(([k]) => k);
+    if (!keys.length) continue;
+    const set = new Set(keys);
+    const at = out.findIndex((g) => g.some((k) => set.has(k)));
+    out = out.map((g) => g.filter((k) => !set.has(k)));
+    out.splice(at < 0 ? out.length : at, 0, keys);
+    out = out.filter((g) => g.length);
+  }
+  return out;
+}
+
 // --- Page state: progressive OCR session + user edits ------------------------------------------
 
 interface Page {
@@ -75,13 +132,15 @@ interface Page {
   deleted: Set<string>;
   /** User-edited sections (line keys in reading order), or null for automatic. */
   sections: string[][] | null;
+  /** User-drawn section boxes (rotatable), applied on top of the other sections, newest last. */
+  areas: Area[];
   seq: number;
   /** The user edited the text by hand: stop overwriting it with OCR results. */
   edited: boolean;
   error: string | null;
   phase: NonNullable<Scan['progress']>['phase'];
 }
-const freshPage = (): Page => ({ session: null, extra: [], replaced: new Set(), deleted: new Set(), sections: null, seq: 0, edited: false, error: null, phase: 'models' });
+const freshPage = (): Page => ({ session: null, extra: [], replaced: new Set(), deleted: new Set(), sections: null, areas: [], seq: 0, edited: false, error: null, phase: 'models' });
 let page: Page = freshPage();
 /** Photos whose orientation was already checked (so manual rotation isn't undone). */
 const checkedOrientation = new WeakSet<HTMLCanvasElement>();
@@ -172,7 +231,18 @@ export function rebuild() {
   const sess = page.session;
   const fromSession = sess ? sess.lines.filter((l) => l.result && !page.replaced.has(l.key)).map((l) => l.result!) : [];
   const all = [...fromSession, ...page.extra].filter((l) => !page.deleted.has(l.key!));
-  const lines = arrange(checkRuby(processFurigana(all, settings.value.display.furigana)), page.sections);
+  const processed = checkRuby(processFurigana(all, settings.value.display.furigana));
+  let lines = arrange(processed, page.sections);
+  const areaInfo: Scan['areas'] = [];
+  if (page.areas.length) {
+    const groups: string[][] = [];
+    for (const l of lines as LaidOutLine[]) (groups[l.block] ??= []).push(l.key!);
+    lines = arrange(processed, applyAreas(groups.filter(Boolean), processed, page.areas));
+    for (const a of page.areas) {
+      const mine = (lines as LaidOutLine[]).filter((l) => inArea(a, quadCentre(l.quad)));
+      areaInfo.push({ ...a, section: mine.length ? (mine[0] as LaidOutLine).block : -1, count: mine.length });
+    }
+  }
   const pending = sess ? sess.lines.filter((l) => l.status !== 'done' && !page.replaced.has(l.key)).map((l) => ({ key: l.key, quad: l.geom.quad, busy: l.status === 'busy' })) : [];
   const total = sess?.lines.length ?? 0;
   const phase = page.error ? 'error' : page.phase === 'read' && sess?.finished ? 'done' : page.phase;
@@ -180,7 +250,8 @@ export function rebuild() {
   setScan({
     lines, ...textFromLines(lines), pending,
     progress: { phase, done: sess?.done ?? 0, total },
-    sectionsEdited: !!page.sections,
+    sectionsEdited: !!page.sections || page.areas.length > 0,
+    areas: areaInfo,
     error: page.error,
   });
   if (phase === 'done' && !lines.length && !s.busy) showToast('No text found. Try ⬚ Area around the text, or retake the photo closer.', 'info');
@@ -190,7 +261,7 @@ export async function openImage(blob: Blob, source = '') {
   const canvas = await toCanvas(blob);
   const url = await canvasUrl(canvas);
   if (scan.value?.url) URL.revokeObjectURL(scan.value.url);
-  scan.value = { canvas, url, lines: [], text: [], meta: [], lineOf: [], ruby: [], geom: [], pending: [], progress: null, sectionsEdited: false, busy: false, error: null, source };
+  scan.value = { canvas, url, lines: [], text: [], meta: [], lineOf: [], ruby: [], geom: [], pending: [], progress: null, sectionsEdited: false, areas: [], busy: false, error: null, source };
   view.value = 'scan';
   startAnalysis();
 }
@@ -200,7 +271,7 @@ export function openText(text: string, source = '') {
   page.session?.cancel();
   page = freshPage();
   const cps = Array.from(text.normalize('NFC'));
-  scan.value = { canvas: null, url: null, lines: [], text: cps, meta: cps.map(() => null), lineOf: cps.map(() => -1), ruby: [], geom: cps.map(() => null), pending: [], progress: null, sectionsEdited: false, busy: false, error: null, source };
+  scan.value = { canvas: null, url: null, lines: [], text: cps, meta: cps.map(() => null), lineOf: cps.map(() => -1), ruby: [], geom: cps.map(() => null), pending: [], progress: null, sectionsEdited: false, areas: [], busy: false, error: null, source };
   view.value = 'scan';
 }
 
@@ -488,8 +559,50 @@ function sectionRect(lines: OcrLine[], W: number, H: number): Rect | null {
 
 export function resetSections() {
   page.sections = null;
+  page.areas = [];
   page.deleted.clear();
   rebuild();
+}
+
+// --- Area (section box) actions --------------------------------------------------------------
+
+/**
+ * Creates a section box from a drawn rectangle. Older boxes it mostly covers are replaced.
+ * When no text was found inside, the box is read first. Returns the new box.
+ */
+export async function createArea(rect: Rect): Promise<Area> {
+  const a: Area = { id: `u${++page.seq}`, cx: rect.x + rect.w / 2, cy: rect.y + rect.h / 2, w: rect.w, h: rect.h, angle: 0 };
+  page.areas = page.areas.filter((o) => areaOverlap(o, a) < 0.5 && areaOverlap(a, o) < 0.5);
+  page.areas.push(a);
+  const s = scan.value;
+  const has = (s?.lines ?? []).some((l) => inArea(a, quadCentre(l.quad))) || (s?.pending ?? []).some((p) => inArea(a, quadCentre(p.quad)));
+  if (!has) await runOcr(rect);
+  rebuild();
+  return a;
+}
+
+/** Moves / stretches / rotates a section box. */
+export function updateArea(id: string, geom: Omit<Area, 'id'>) {
+  page.areas = page.areas.map((a) => (a.id === id ? { ...geom, id } : a));
+  // A box dragged over older boxes replaces them.
+  const me = page.areas.find((a) => a.id === id);
+  if (me) page.areas = page.areas.filter((o) => o.id === id || (areaOverlap(o, me) < 0.5 && areaOverlap(me, o) < 0.5));
+  rebuild();
+}
+
+export function deleteArea(id: string) {
+  page.areas = page.areas.filter((a) => a.id !== id);
+  rebuild();
+}
+
+/** Reads a section box again (its bounding rectangle). */
+export async function rereadArea(id: string) {
+  const a = page.areas.find((x) => x.id === id);
+  const s = scan.value;
+  if (!a || !s?.canvas) return;
+  const xs = areaCorners(a).map((p) => p.x), ys = areaCorners(a).map((p) => p.y);
+  const x = Math.max(0, Math.min(...xs)), y = Math.max(0, Math.min(...ys));
+  await runOcr({ x, y, w: Math.min(s.canvas.width, Math.max(...xs)) - x, h: Math.min(s.canvas.height, Math.max(...ys)) - y });
 }
 
 export async function rotateScan() {

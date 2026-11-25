@@ -25,6 +25,8 @@ export interface Scan {
   progress: { phase: 'models' | 'detect' | 'read' | 'done' | 'error'; done: number; total: number } | null;
   /** The user edited the sections (reading order / grouping). */
   sectionsEdited: boolean;
+  /** User-drawn section boxes: geometry, section number they produce, and how many lines they hold. */
+  areas: { id: string; cx: number; cy: number; w: number; h: number; angle: number; section: number; count: number }[];
   busy: boolean;
   error: string | null;
   timing?: number;

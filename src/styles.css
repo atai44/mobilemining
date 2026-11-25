@@ -317,3 +317,22 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
   .scan.has-panel .panel-grip { flex: 0 0 12px; cursor: ew-resize; }
   .scan.has-panel .panel-grip::before { width: 5px; height: 44px; }
 }
+
+/* --- User-drawn section boxes ------------------------------------------------- */
+.area-box { fill-opacity: 0.06; stroke-width: 2px; stroke-dasharray: 7 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+.area-box.selected { fill-opacity: 0.12; stroke-dasharray: none; stroke-width: 2.5px; }
+.area-box.empty { stroke-dasharray: 2 4; }
+.area-box.flash { animation: area-flash 0.45s ease-in-out 3; }
+@keyframes area-flash { 50% { fill-opacity: 0.4; stroke-width: 5px; } }
+.area-badge { cursor: pointer; }
+.area-badge circle { stroke: #fff; stroke-width: 2px; vector-effect: non-scaling-stroke; }
+.area-badge text { fill: #fff; font-weight: 700; font-family: system-ui, sans-serif; pointer-events: none; }
+.area-handle { fill: #fff; stroke-width: 2.5px; vector-effect: non-scaling-stroke; touch-action: none; cursor: grab; }
+.area-handle.rotate { cursor: alias; }
+.area-handle.move { cursor: move; fill-opacity: 0.85; }
+.area-knob-line { stroke-width: 2px; vector-effect: non-scaling-stroke; pointer-events: none; }
+.area-glyph { pointer-events: none; fill: #333; font-family: system-ui, sans-serif; }
+.notice-inline { padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); margin: 8px 0; }
+.ok-text { color: var(--ok); }
+/* Toasts at the top: the bottom holds the dictionary panel and editing bars. */
+.toast { bottom: auto; top: calc(env(safe-area-inset-top) + 62px); }

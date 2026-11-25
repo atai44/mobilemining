@@ -3,6 +3,7 @@ import type { FuriganaMode } from '../lib/settings';
 import { Toggle } from './ui';
 import { AnkiSettings } from './settings/AnkiSettings';
 import { DictionarySettings } from './settings/DictionarySettings';
+import { BackupSettings } from './settings/BackupSettings';
 
 export function SettingsView() {
   const st = settings.value;
@@ -65,6 +66,8 @@ export function SettingsView() {
       </section>
 
       <DictionarySettings />
+
+      <BackupSettings />
 
       <section class="card about">
         <h2>About</h2>

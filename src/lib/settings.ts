@@ -99,6 +99,11 @@ function merge<T>(base: T, over: unknown): T {
   return out as T;
 }
 
+/** Settings from a backup or older version, completed with current defaults. */
+export function completeSettings(over: unknown): Settings {
+  return merge(structuredClone(DEFAULT_SETTINGS), over);
+}
+
 export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(KEY);

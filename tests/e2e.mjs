@@ -320,6 +320,43 @@ for (const fx of ['dense-vertical.png', 'dense-vertical-tilt.png', 'dense-horizo
   await page.waitForTimeout(400);
   await page.click('[data-testid=sections]');
   check((await count()) === 5, `area box becomes its own section (${await count()} sections)`);
+  await page.click('.section-bar >> text=Done');
+  // the box stays visible and selected; drawing a bigger box over it replaces it
+  check((await page.$$('[data-area]')).length === 1 && !!(await page.$('[data-testid=area-bar]')), 'new section box is shown and selected');
+  await page.click('[data-testid=select-area]');
+  await page.mouse.move(capBox.x0 - 30, capBox.y0 - 6);
+  await page.mouse.down();
+  await page.mouse.move(capBox.x1 + 6, capBox.y1 + 6, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  check((await page.$$('[data-area]')).length === 1, 'a box drawn over an existing box replaces it');
+  const areaW = () => page.$eval('[data-area] polygon.area-box', (e) => e.getBoundingClientRect().width);
+  const before = await areaW();
+  // stretch: drag the left edge to the left end of the caption
+  const left = await page.$eval('[data-handle="edge-10"]', (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await page.mouse.move(left.x, left.y);
+  await page.mouse.down();
+  await page.mouse.move(capBox.x0 - (capBox.x1 - capBox.x0) * 1.3, left.y, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const after = await areaW();
+  const bar = await page.$eval('[data-testid=area-bar]', (e) => e.innerText);
+  check(after > before * 1.5 && /2 lines/.test(bar), `stretching a box (${before.toFixed(0)} → ${after.toFixed(0)}px; ${bar.split('—')[0].trim()})`);
+  // rotate with the knob
+  const knob = await page.$eval('[data-handle=rotate]', (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  const mv = await page.$eval('[data-handle=move]', (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await page.mouse.move(knob.x, knob.y);
+  await page.mouse.down();
+  await page.mouse.move(mv.x + (mv.y - knob.y) * 0.3, knob.y, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const pts = await page.$eval('[data-area] polygon.area-box', (e) => e.getAttribute('points'));
+  const ys = pts.split(' ').map((p) => Number(p.split(',')[1]));
+  check(Math.abs(ys[0] - ys[1]) > 3, 'rotating a box with the knob');
+  await page.click('[data-testid=area-delete]');
+  await page.waitForTimeout(200);
+  check((await page.$$('[data-area]')).length === 0, 'removing a box');
+  await page.click('[data-testid=sections]');
   await pickSection(3);
   await page.click('[data-testid=sec-reread]');
   await page.waitForFunction(() => !document.querySelector('[data-testid=ocr-progress]'), null, { timeout: 60_000 });
@@ -435,6 +472,26 @@ await page.click('[data-testid=anki-setup]');
 await page.waitForSelector('[data-field="Meaning"]', { timeout: 20_000 });
 check(lastCall('createModel')?.params.modelName === 'MobileMining', 'creates the MobileMining note type');
 check(await page.$eval('[data-field="Meaning"]', (e) => e.value) === '{glossary}', 'MobileMining fields mapped');
+
+// Backup & restore into a fresh browser profile
+{
+  await tab('Settings');
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=export-backup]')]);
+  const backupPath = join(shots ?? dirname(fileURLToPath(import.meta.url)), 'backup-test.zip');
+  await dl.saveAs(backupPath);
+  const ctx2 = await browser.newContext({ ...devices['Pixel 7'] });
+  const p2 = await ctx2.newPage();
+  await p2.goto(base);
+  await p2.click('.tabs >> text=Settings');
+  await p2.setInputFiles('[data-testid=backup-file]', backupPath);
+  await p2.waitForSelector('[data-testid=restore-report]', { timeout: 120_000 });
+  const rep = await p2.$eval('[data-testid=restore-report]', (e) => e.innerText);
+  console.log('  ' + rep.replace(/\n/g, '\n  '));
+  const dictTitles = await p2.$$eval('.dict-title', (els) => els.map((e) => e.textContent));
+  const model = await p2.evaluate(() => JSON.parse(localStorage.getItem('mobilemining.settings') ?? '{}').anki?.model ?? '');
+  check(rep.includes('Settings') && dictTitles.includes('Test Dict') && dictTitles.includes('Test Freq') && /✓ [1-9]\d* mined/.test(rep) && model === 'MobileMining', `backup restored in a new browser (dicts: ${dictTitles.join(', ')}; note type ${model})`);
+  await ctx2.close();
+}
 
 // 9. Mined list
 await tab('Mined');

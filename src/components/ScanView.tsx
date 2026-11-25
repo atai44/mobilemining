@@ -4,7 +4,7 @@ import { scan, settings, updateSettings, view, showToast, ocrState, locate, inde
 import {
   runOcr, rotateScan, startAnalysis, focusAt, setEditedText,
   mergeSections, moveSection, splitSection, deleteSection, redirectSection, resetSections,
-  newSectionFromBox, rereadSection,
+  rereadSection, createArea, updateArea, deleteArea, rereadArea, areaCorners, type Area,
 } from '../scanActions';
 import type { LaidOutLine } from '../lib/ocr/layout';
 import type { TermResult } from '../lib/lookup';
@@ -147,6 +147,8 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
   const [zoom, setZoom] = useState(1);
   const [fit, setFit] = useState(1); // zoom at which the whole page is visible
   const [draw, setDraw] = useState<'area' | null>(null);
+  const [selArea, setSelArea] = useState<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
   const selecting = draw !== null;
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [focus, setFocus] = useState<Point | null>(null);
@@ -251,11 +253,15 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
     rect.h = Math.min(rect.h, H - rect.y);
     setDrag(null);
     if (rect.w > 12 && rect.h > 12) {
-      const mode = draw;
       setDraw(null);
       // The box becomes its own section (reading the area first if no text was found in it).
-      void mode;
-      newSectionFromBox(rect);
+      createArea(rect).then((a) => {
+        setSelArea(a.id);
+        setFlash(a.id);
+        setTimeout(() => setFlash((f) => (f === a.id ? null : f)), 1400);
+        const info = scan.value?.areas.find((x) => x.id === a.id);
+        showToast(info && info.count ? `Section ${info.section + 1} · ${info.count} line${info.count === 1 ? '' : 's'}` : 'No text found in that box', info?.count ? 'ok' : 'info');
+      });
     }
   };
 
@@ -372,10 +378,20 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
               <rect class="sel-rect" x={Math.min(drag.x0, drag.x1)} y={Math.min(drag.y0, drag.y1)} width={Math.abs(drag.x1 - drag.x0)} height={Math.abs(drag.y1 - drag.y0)} />
             )}
             {sections && <SectionOverlay unit={unit} />}
+            {!sections && (
+              <AreaLayer
+                svgRef={svgRef}
+                W={W}
+                selected={selArea}
+                flash={flash}
+                onSelect={setSelArea}
+              />
+            )}
           </svg>
         </div>
       </div>
       {sections && <SectionBar onDone={() => { setDraw(null); setSections(false); }} />}
+      {!sections && selArea && <AreaBar id={selArea} onDone={() => setSelArea(null)} />}
       {!pg || pg.phase !== 'done' || s.lines.length || s.busy ? null : <div class="banner small">{s.error ?? 'No text found. Try ⬚ Area around the text, or retake the photo closer.'}</div>}
     </section>
   );
@@ -415,6 +431,123 @@ function sectionShapes(lines: LaidOutLine[]) {
     const vertical = ls.filter((l) => l.vertical).length * 2 >= ls.length;
     return { block, lines: ls, x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), vertical };
   });
+}
+
+// --- User-drawn section boxes ------------------------------------------------------------------
+
+type AreaGeom = Omit<Area, 'id'>;
+type AreaDrag = { kind: 'corner' | 'edge' | 'rotate' | 'move'; sx: number; sy: number; start: AreaGeom; p0: Point };
+
+const rotate = (x: number, y: number, a: number) => ({ x: x * Math.cos(a) - y * Math.sin(a), y: x * Math.sin(a) + y * Math.cos(a) });
+
+/** New geometry for a box while one of its handles is dragged to image point p. */
+function dragArea(d: AreaDrag, p: Point): AreaGeom {
+  const g = d.start;
+  if (d.kind === 'move') return { ...g, cx: g.cx + p.x - d.p0.x, cy: g.cy + p.y - d.p0.y };
+  if (d.kind === 'rotate') return { ...g, angle: Math.atan2(p.y - g.cy, p.x - g.cx) + Math.PI / 2 };
+  // Stretch in the box's own (rotated) frame, keeping the opposite side fixed.
+  const lp = rotate(p.x - g.cx, p.y - g.cy, -g.angle);
+  let { w, h } = g;
+  let ox = 0, oy = 0; // centre offset in the box frame
+  const MIN = 12;
+  if (d.sx) { const opp = -d.sx * g.w / 2; w = Math.max(MIN, Math.abs(lp.x - opp)); ox = opp + (d.sx * w) / 2; }
+  if (d.sy) { const opp = -d.sy * g.h / 2; h = Math.max(MIN, Math.abs(lp.y - opp)); oy = opp + (d.sy * h) / 2; }
+  const c = rotate(ox, oy, g.angle);
+  return { ...g, w, h, cx: g.cx + c.x, cy: g.cy + c.y };
+}
+
+function AreaLayer({ svgRef, W, selected, flash, onSelect }: {
+  svgRef: { current: SVGSVGElement | null };
+  W: number;
+  selected: string | null;
+  flash: string | null;
+  onSelect: (id: string | null) => void;
+}) {
+  const s = scan.value!;
+  const [live, setLive] = useState<{ id: string; geom: AreaGeom } | null>(null);
+  const drag = useRef<AreaDrag | null>(null);
+  // Handles are sized in screen pixels so they stay grabbable at any zoom.
+  const scale = (svgRef.current?.getBoundingClientRect().width ?? W) / W;
+  const px = (n: number) => n / Math.max(scale, 1e-3);
+  const toImage = (e: PointerEvent): Point => {
+    const r = svgRef.current!.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * (r.height / r.width) * W };
+  };
+  const start = (a: AreaGeom & { id: string }, kind: AreaDrag['kind'], sx = 0, sy = 0) => (e: PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    drag.current = { kind, sx, sy, start: { cx: a.cx, cy: a.cy, w: a.w, h: a.h, angle: a.angle }, p0: toImage(e) };
+    setLive({ id: a.id, geom: drag.current.start });
+  };
+  const move = (e: PointerEvent) => {
+    if (!drag.current || !live) return;
+    setLive({ id: live.id, geom: dragArea(drag.current, toImage(e)) });
+  };
+  const end = () => {
+    if (drag.current && live) updateArea(live.id, live.geom);
+    drag.current = null;
+    setLive(null);
+  };
+  const handlers = { onPointerMove: move, onPointerUp: end, onPointerCancel: () => { drag.current = null; setLive(null); } };
+  return (
+    <g class="areas">
+      {s.areas.map((info) => {
+        const a = live?.id === info.id ? { ...info, ...live.geom } : info;
+        const pts = areaCorners({ ...a, id: a.id });
+        const color = SECTION_COLORS[Math.max(0, info.section) % SECTION_COLORS.length];
+        const sel = selected === info.id;
+        const top = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+        const up = rotate(0, -px(34), a.angle);
+        const knob = { x: top.x + up.x, y: top.y + up.y };
+        const hs = px(sel ? 11 : 0);
+        const handles: [AreaDrag['kind'], number, number, Point][] = [
+          ['corner', -1, -1, pts[0]], ['corner', 1, -1, pts[1]], ['corner', 1, 1, pts[2]], ['corner', -1, 1, pts[3]],
+          ['edge', 0, -1, top], ['edge', 1, 0, { x: (pts[1].x + pts[2].x) / 2, y: (pts[1].y + pts[2].y) / 2 }],
+          ['edge', 0, 1, { x: (pts[2].x + pts[3].x) / 2, y: (pts[2].y + pts[3].y) / 2 }], ['edge', -1, 0, { x: (pts[3].x + pts[0].x) / 2, y: (pts[3].y + pts[0].y) / 2 }],
+        ];
+        return (
+          <g key={info.id} data-area={info.id}>
+            <polygon class={`area-box${sel ? ' selected' : ''}${flash === info.id ? ' flash' : ''}${info.count ? '' : ' empty'}`} points={pts.map((p) => `${p.x},${p.y}`).join(' ')} style={{ stroke: color, fill: color }} />
+            <g class="area-badge" onClick={(e) => { e.stopPropagation(); onSelect(sel ? null : info.id); }} data-testid="area-badge">
+              <circle cx={pts[0].x} cy={pts[0].y} r={px(13)} style={{ fill: color }} />
+              <text x={pts[0].x} y={pts[0].y} font-size={px(14)} text-anchor="middle" dominant-baseline="central">{info.section >= 0 ? info.section + 1 : '·'}</text>
+            </g>
+            {sel && (
+              <>
+                <line class="area-knob-line" x1={top.x} y1={top.y} x2={knob.x} y2={knob.y} style={{ stroke: color }} />
+                <circle class="area-handle rotate" cx={knob.x} cy={knob.y} r={px(12)} style={{ stroke: color }} onPointerDown={start(a, 'rotate')} {...handlers} data-handle="rotate" />
+                <circle class="area-handle move" cx={a.cx} cy={a.cy} r={px(14)} style={{ stroke: color }} onPointerDown={start(a, 'move')} {...handlers} data-handle="move" />
+                <text class="area-glyph" x={knob.x} y={knob.y} font-size={px(15)} text-anchor="middle" dominant-baseline="central">⟲</text>
+                <text class="area-glyph" x={a.cx} y={a.cy} font-size={px(16)} text-anchor="middle" dominant-baseline="central">✥</text>
+                {handles.map(([kind, sx, sy, p]) => (
+                  <rect key={`${kind}${sx}${sy}`} class="area-handle" x={p.x - hs} y={p.y - hs} width={hs * 2} height={hs * 2} rx={px(3)}
+                    style={{ stroke: color }} onPointerDown={start(a, kind, sx, sy)} {...handlers} data-handle={`${kind}${sx}${sy}`} />
+                ))}
+              </>
+            )}
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+function AreaBar({ id, onDone }: { id: string; onDone: () => void }) {
+  const info = scan.value!.areas.find((a) => a.id === id);
+  if (!info) return null;
+  return (
+    <div class="section-bar" data-testid="area-bar">
+      <span class="small">
+        <b>{info.section >= 0 ? `Section ${info.section + 1}` : 'Empty box'}</b> · {info.count} line{info.count === 1 ? '' : 's'} — drag the handles to stretch, ⟲ to rotate, ✥ to move
+      </span>
+      <div class="row">
+        <button class="button small" onClick={() => rereadArea(id)} data-testid="area-reread">↻ Re-read</button>
+        <button class="button small danger" onClick={() => { deleteArea(id); onDone(); }} data-testid="area-delete">🗑 Remove</button>
+        <button class="button small primary" onClick={onDone}>Done</button>
+      </div>
+    </div>
+  );
 }
 
 function SectionOverlay({ unit }: { unit: number }) {

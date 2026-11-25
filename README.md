@@ -31,7 +31,12 @@ uploaded unless you turn on the optional cloud OCR engine. After the first load 
 - **Fix the sections**: § Sections shows how the page was split into sections and their reading order. You can
   reorder, merge, split at a line, re-read a box or re-read it as vertical/horizontal, delete junk (page numbers, stray
   marks), or reset. ⬚ Area: drag a box around the text you want and it becomes its own section (read first if nothing
-  was detected there).
+  was detected there). The box stays on the photo: stretch it with its handles, rotate it with ⟲, move it with ✥;
+  a new box drawn over it replaces it.
+- **Your data stays yours**: dictionaries, settings and mined cards live only in your browser (they survive app
+  updates). Settings → Your data shows whether the browser has promised to keep them, and saves/restores a single
+  backup file (settings, Anki setup, cards, and imported dictionaries as standard Yomitan zips) to move to another
+  device or browser. No accounts, nothing uploaded.
 - **Read on the photo itself**: scroll and pinch-zoom the photo (Ctrl/trackpad pinch on desktop) and tap any word
   where it's printed. The word is highlighted in place. A text view (Aa) is still there for copying and editing.
 - **Mixed text directions** on one page work: a vertical body with a horizontal heading or captions, speech bubbles,
