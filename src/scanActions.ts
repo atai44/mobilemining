@@ -428,15 +428,6 @@ export const mergeSections = (a: number, b: number) => editSections((secs) => {
   return secs;
 });
 
-/** Splits section i so that `key` (and the lines after it in reading order) start a new section. */
-export const splitSection = (i: number, key: string) => editSections((secs) => {
-  const ordered = ((scan.value?.lines ?? []) as LaidOutLine[]).filter((l) => l.block === i).map((l) => l.key!);
-  const at = ordered.indexOf(key);
-  if (at <= 0) return secs;
-  secs.splice(i, 1, ordered.slice(0, at), ordered.slice(at));
-  return secs;
-});
-
 export const deleteSection = (i: number) => editSections((secs) => {
   for (const k of secs[i] ?? []) page.deleted.add(k);
   secs.splice(i, 1);

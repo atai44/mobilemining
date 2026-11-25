@@ -293,9 +293,6 @@ for (const fx of ['dense-vertical.png', 'dense-vertical-tilt.png', 'dense-horizo
   await page.click('[data-testid=sec-merge]');
   await pickSection(2); // body
   check((await count()) === 2, 'merging two sections');
-  await pickSection(1, 3); // a body column inside the merged section
-  await page.click('[data-testid=sec-split]');
-  check((await count()) === 3, 'splitting a section at a line');
   await page.click('[data-testid=sec-reset]');
   const reset = await flatText();
   check((await count()) === 4 && reset.startsWith('第一章') && reset.includes('注：'), 'reset restores automatic sections');

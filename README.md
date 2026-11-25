@@ -29,7 +29,7 @@ uploaded unless you turn on the optional cloud OCR engine. After the first load 
   which fixes lost small kana and voicing marks (ちよつと → ちょっと) and splits runs covering two words. Where a
   kanji was misread, the furigana can correct it from the OCR's runner-up guesses (説論 + せつゆ → 説諭).
 - **Fix the sections**: § Sections shows how the page was split into sections and their reading order. You can
-  reorder, merge, split at a line, re-read a box or re-read it as vertical/horizontal, delete junk (page numbers, stray
+  reorder, merge, re-read a box or re-read it as vertical/horizontal, delete junk (page numbers, stray
   marks), or reset. ⬚ Area: drag a box around the text you want and it becomes its own section (read first if nothing
   was detected there). The box stays on the photo: stretch it with its handles, rotate it with ⟲, move it with ✥;
   a new box drawn over it replaces it.

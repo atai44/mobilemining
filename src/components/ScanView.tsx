@@ -3,7 +3,7 @@ import { signal } from '@preact/signals';
 import { scan, settings, updateSettings, view, showToast, ocrState, locate, indexOf } from '../store';
 import {
   runOcr, rotateScan, startAnalysis, focusAt, setEditedText,
-  mergeSections, moveSection, splitSection, deleteSection, redirectSection, resetSections,
+  mergeSections, moveSection, deleteSection, redirectSection, resetSections,
   rereadSection, createArea, updateArea, deleteArea, rereadArea, areaCorners, type Area,
 } from '../scanActions';
 import type { LaidOutLine } from '../lib/ocr/layout';
@@ -591,7 +591,7 @@ function SectionOverlay({ unit }: { unit: number }) {
             <rect x={sh.x0 - pad} y={sh.y0 - pad} width={sh.x1 - sh.x0 + 2 * pad} height={sh.y1 - sh.y0 + 2 * pad} rx={unit * 0.6}
               class={`section-box${selected ? ' selected' : ''}`} style={{ stroke: color, fill: color }} />
             {sh.lines.map((l) => (
-              <polygon key={l.key} class={`section-line${selected && l.key === sel.key ? ' split-at' : ''}`} points={l.quad.map((p) => `${p.x},${p.y}`).join(' ')}
+              <polygon key={l.key} class="section-line" points={l.quad.map((p) => `${p.x},${p.y}`).join(' ')}
                 data-section-line={l.key} onClick={(e) => { e.stopPropagation(); pick(sh.block, l.key!); }} />
             ))}
             <circle cx={bx} cy={by} r={unit * 1.7} style={{ fill: color }} class="section-badge" />
@@ -608,7 +608,6 @@ function SectionBar({ onDone }: { onDone: () => void }) {
   const sel = selection.value;
   const count = new Set((s.lines as LaidOutLine[]).map((l) => l.block)).size;
   const valid = sel.block >= 0 && sel.block < count;
-  const firstKey = (s.lines as LaidOutLine[]).find((l) => l.block === sel.block)?.key;
   const set = (v: Partial<typeof sel>) => (selection.value = { ...sel, ...v });
   return (
     <div class="section-bar" data-testid="section-bar">
@@ -622,7 +621,6 @@ function SectionBar({ onDone }: { onDone: () => void }) {
           <button class="button small" disabled={sel.block === 0} onClick={() => { moveSection(sel.block, -1); set({ block: sel.block - 1 }); }} title="Read earlier" data-testid="sec-earlier">◀ Earlier</button>
           <button class="button small" disabled={sel.block >= count - 1} onClick={() => { moveSection(sel.block, 1); set({ block: sel.block + 1 }); }} title="Read later" data-testid="sec-later">Later ▶</button>
           <button class="button small" onClick={() => set({ merging: true })} data-testid="sec-merge">Merge…</button>
-          <button class="button small" disabled={!sel.key || sel.key === firstKey} onClick={() => { splitSection(sel.block, sel.key); set({ block: sel.block + 1 }); }} title="Start a new section at the line you tapped" data-testid="sec-split">Split here</button>
           <button class="button small" onClick={() => rereadSection(sel.block)} title="Read this box again (finds text that was missed)" data-testid="sec-reread">↻ Re-read box</button>
           <button class="button small" onClick={() => redirectSection(sel.block, 'vertical')} title="Re-read this section as vertical text" data-testid="sec-vertical">縦</button>
           <button class="button small" onClick={() => redirectSection(sel.block, 'horizontal')} title="Re-read this section as horizontal text" data-testid="sec-horizontal">横</button>
