@@ -56,7 +56,7 @@ export function MineSheet({ req, onClose }: { req: MineRequest; onClose: () => v
     try {
       const out = await mineTerm(r, values, image, force);
       if (out.error) showToast(`Anki: ${out.error}`, 'error');
-      else if (out.sent) showToast(`${out.sent.action === 'updated' ? 'Updated' : 'Added'} 「${r.expression}」`, 'ok');
+      else if (out.sent) showToast(`${out.sent.action === 'updated' ? 'Updated' : 'Added'} 「${r.expression}」${out.sent.warning ? ` · ${out.sent.warning}` : ''}`, out.sent.warning ? 'info' : 'ok');
       else if (method === 'local') showToast(`Saved 「${r.expression}」`, 'ok');
       onClose();
     } catch (e) {

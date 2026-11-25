@@ -388,7 +388,7 @@ export function hash(s: string): string {
   return (h >>> 0).toString(36);
 }
 
-export interface SendResult { noteId: number; action: 'added' | 'updated' }
+export interface SendResult { noteId: number; action: 'added' | 'updated'; warning?: string }
 
 /**
  * Sends a mined note following the duplicate behavior setting:
@@ -401,10 +401,17 @@ export async function sendToAnkiConnect(settings: Settings, note: MinedNote, for
   const values = { ...note.fields };
   const imageFields = new Set([...usesMarker(a.fields, 'image'), ...usesMarker(a.fields, 'screenshot'), ...usesMarker(a.fields, 'clipboard-image')]);
   let img = '';
+  let warning: string | undefined;
   if (note.image && imageFields.size) {
     const name = `mobilemining_${note.created}.jpg`;
-    const stored = await c.storeMediaFile(name, await blobToBase64(note.image));
-    img = `<img src="${escapeHtml(stored || name)}">`;
+    try {
+      const stored = await c.storeMediaFile(name, await blobToBase64(note.image));
+      img = `<img src="${escapeHtml(stored || name)}">`;
+    } catch (e) {
+      // In the app, a picture AnkiDroid can't store doesn't stop the card from being added.
+      if (!(c instanceof AnkiDroidClient)) throw e;
+      warning = `no picture (${String((e as Error).message ?? e)})`;
+    }
   }
   for (const m of MEDIA_MARKERS) values[m] = m === 'audio' ? '' : img;
   const fields = renderFields(settings, values);
@@ -424,7 +431,7 @@ export async function sendToAnkiConnect(settings: Settings, note: MinedNote, for
       const update: Record<string, unknown> = { id: dupes[0], modelName: a.model, fields: Object.fromEntries(Object.entries(fields).filter(([, v]) => v)) };
       if (audio) update.audio = audio;
       await c.updateNoteFields(update);
-      return { noteId: dupes[0], action: 'updated' };
+      return { noteId: dupes[0], action: 'updated', warning };
     }
   }
   const n: Record<string, unknown> = {
@@ -435,7 +442,7 @@ export async function sendToAnkiConnect(settings: Settings, note: MinedNote, for
     options: { ...duplicateOptions(settings), allowDuplicate: true },
   };
   if (audio) n.audio = audio;
-  return { noteId: await c.addNote(n), action: 'added' };
+  return { noteId: await c.addNote(n), action: 'added', warning };
 }
 
 export async function viewNote(settings: Settings, noteId: number) {

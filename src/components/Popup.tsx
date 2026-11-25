@@ -124,7 +124,7 @@ export function Popup({ docked, index, results: initialResults, anchor, onClose,
     const out = await quickMine(r, index, force);
     setAnki((p) => ({ ...p, [k]: { ...(p[k] ?? { dupes: [] }), busy: false, added: out.sent?.noteId } }));
     if (out.error) showToast(out.error, 'error');
-    else if (out.sent) showToast(`${out.sent.action === 'updated' ? 'Updated' : 'Added'} 「${r.expression}」`, 'ok');
+    else if (out.sent) showToast(`${out.sent.action === 'updated' ? 'Updated' : 'Added'} 「${r.expression}」${out.sent.warning ? ` · ${out.sent.warning}` : ''}`, out.sent.warning ? 'info' : 'ok');
     else if (st.anki.method === 'local') showToast(`Saved 「${r.expression}」`, 'ok');
   };
 

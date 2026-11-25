@@ -60,6 +60,9 @@ dependencies {
     implementation project(':capacitor-android')
     // AnkiDroid's API library (LGPL-3.0), vendored from https://github.com/ankidroid/Anki-Android (api-v1.1.0)
     implementation(name: 'ankidroid-api-1.1.0', ext: 'aar')
+    // One Kotlin standard library version for every variant (plugins pull in different ones)
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
+    androidTestImplementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
