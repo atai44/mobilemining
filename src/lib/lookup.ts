@@ -29,6 +29,8 @@ export interface TermResult {
   entry?: Entry;
   /** Number of code points of the scanned text this result covers. */
   length: number;
+  /** Code points of the source text spanned, including skipped line breaks (≥ length). */
+  span?: number;
   /** Surface text that matched (as it appears in the source). */
   source: string;
   /** The dictionary form searched for. */
@@ -58,18 +60,28 @@ export interface LookupSources {
   dictOrder?: string[];
   /** Dictionaries whose frequency values are occurrence counts (higher = more common). */
   occurrenceFreqDicts?: Set<string>;
+  /** Continue words across a single line break. */
+  crossLineBreaks?: boolean;
 }
 
 const STOP = new Set(Array.from(' \t\n\r　。、，．！？!?「」『』（）()【】［］[]〈〉《》…‥：:；;"\'“”‘’・〜～'));
 
-/** Returns the scan window (code points) starting at `start`, stopping at punctuation/whitespace. */
-export function scanWindow(text: string[], start: number, maxLen = 20): string[] {
-  const out: string[] = [];
+/**
+ * Returns the scan window (code points) starting at `start`, stopping at punctuation/whitespace.
+ * With `crossSoftBreaks`, a single line break (next line of the same paragraph or column) is
+ * skipped so words split across lines are still found. `index` maps window positions to `text`.
+ */
+export function scanWindow(text: string[], start: number, maxLen = 20, crossSoftBreaks = false): string[] & { index?: number[] } {
+  const out: string[] & { index?: number[] } = [];
+  const index: number[] = [];
   for (let i = start; i < text.length && out.length < maxLen; i++) {
     const c = text[i];
+    if (c === '\n' && crossSoftBreaks && out.length && text[i + 1] !== '\n' && text[i - 1] !== '\n') continue;
     if (STOP.has(c)) break;
     out.push(normalizeText(c));
+    index.push(i);
   }
+  out.index = index;
   return out;
 }
 
@@ -123,8 +135,9 @@ export async function findTerms(text: string[], start: number, sources: KeyLooku
   const src: LookupSources = typeof sources === 'function' ? { builtin: sources } : sources;
   const order = src.dictOrder ?? [BUILTIN_DICT];
   const rank = (dict: string) => { const i = order.indexOf(dict); return i < 0 ? order.length : i; };
-  const win = scanWindow(text, start);
+  const win = scanWindow(text, start, 20, !!src.crossLineBreaks);
   if (!win.length) return [];
+  const winIndex = win.index ?? win.map((_, i) => start + i);
   // Build candidates for each prefix length.
   const candidates: { length: number; term: string; conds: Cond[]; reasons: string[] }[] = [];
   for (let len = win.length; len >= 1; len--) {
@@ -239,7 +252,7 @@ export async function findTerms(text: string[], start: number, sources: KeyLooku
     rank(a.definitions[0]?.dict ?? '') - rank(b.definitions[0]?.dict ?? '') ||
     (a.entry?.id ?? 0) - (b.entry?.id ?? 0),
   );
-  return results.slice(0, maxResults).map(({ matchedKanji: _m, key: _k, defIds: _d, ...r }) => r as TermResult);
+  return results.slice(0, maxResults).map(({ matchedKanji: _m, key: _k, defIds: _d, ...r }) => ({ ...r, span: winIndex[r.length - 1] - start + 1 }) as TermResult);
 }
 
 function buildResult(e: Entry, term: string, source: string, length: number, reasons: string[]): (TermResult & { matchedKanji: boolean }) | null {
@@ -288,7 +301,12 @@ const QUOTE_CLOSE = new Set(Array.from('」』）)】'));
  * (common in OCR of books) are treated as soft unless `hardBreaks` is set.
  */
 export function extractSentence(text: string[], pos: number, hardBreaks = false): { sentence: string; start: number; end: number } {
-  const isEnd = (c: string) => SENTENCE_END.has(c) && (c !== '\n' || hardBreaks);
+  // A single line break continues the paragraph; a blank line (block boundary) ends the sentence.
+  const isEndAt = (i: number) => {
+    const c = text[i];
+    if (c !== '\n') return SENTENCE_END.has(c);
+    return hardBreaks || text[i - 1] === '\n' || text[i + 1] === '\n';
+  };
   let start = pos;
   let depth = 0;
   let insideQuote = false;
@@ -298,7 +316,7 @@ export function extractSentence(text: string[], pos: number, hardBreaks = false)
     else if (QUOTE_OPEN.has(c)) {
       if (depth === 0) { insideQuote = true; break; } // inside a quote: start after its opening bracket
       depth--;
-    } else if (depth === 0 && isEnd(c)) break;
+    } else if (depth === 0 && isEndAt(start - 1)) break;
     start--;
   }
   let end = pos;
@@ -309,7 +327,7 @@ export function extractSentence(text: string[], pos: number, hardBreaks = false)
     else if (QUOTE_CLOSE.has(c)) {
       if (depth === 0) break;
       depth--;
-    } else if (depth === 0 && isEnd(c)) {
+    } else if (depth === 0 && isEndAt(end)) {
       if (c !== '\n') end++;
       // include trailing closing punctuation
       const trailing = insideQuote ? /[！？!?。]/ : /[！？!?。」』）]/;

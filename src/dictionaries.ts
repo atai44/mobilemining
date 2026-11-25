@@ -38,5 +38,6 @@ export async function lookupAt(text: string[], index: number): Promise<TermResul
     meta: imported.size ? (exprs) => lookupTermMeta(exprs, imported) : undefined,
     dictOrder: order,
     occurrenceFreqDicts: occurrenceFreqDicts(),
+    crossLineBreaks: !settings.value.display.hardLineBreaks,
   });
 }

@@ -16,34 +16,55 @@ function kanaRatio(l: OcrLine): number {
   return cs.filter((c) => isKana(c.c)).length / cs.length;
 }
 
-/** Index of the main line that `r` annotates, or -1. */
+/**
+ * Index of the main line that `r` annotates, or -1.
+ *
+ * Works in each candidate line's own (rotated) reading frame, so tilted or slightly curved
+ * photos don't confuse neighbouring lines: furigana always sits on the "top" side of its base
+ * (above horizontal lines, right of vertical columns), i.e. at a negative offset along the
+ * frame's normal, roughly half a base-thickness plus half a ruby-thickness away.
+ */
 function findBase(lines: OcrLine[], ri: number): number {
   const r = lines[ri];
-  if (kanaRatio(r) < 0.75 || r.chars.length > 40) return -1;
+  if (r.chars.length > 40) return -1;
+  const mostlyKana = kanaRatio(r) >= 0.75;
   const tr = thickness(r);
-  let best = -1, bestGap = Infinity;
+  const rLen = dist(r.quad[0], r.quad[1]);
+  const rubySize = Math.min(tr, rLen / Math.max(1, r.chars.length));
+  const rc = centre(r);
+  // Ruby extent along its own axis (used to require overlap with the base)
+  const rEnds = [mix(r.quad[0], r.quad[3], 0.5), mix(r.quad[1], r.quad[2], 0.5)];
+  let best = -1, bestScore = Infinity;
   lines.forEach((b, bi) => {
-    if (bi === ri || b.vertical !== r.vertical) return;
+    if (bi === ri || b.vertical !== r.vertical || !b.chars.length) return;
     const tb = thickness(b);
-    if (tr > tb * 0.7 || b.chars.length < 1) return;
-    const rb = r.box, bb = b.box;
-    let gap: number, overlap: number;
-    if (b.vertical) {
-      // ruby column sits to the right of the base column
-      gap = rb.x - (bb.x + bb.w);
-      overlap = Math.min(rb.y + rb.h, bb.y + bb.h + tb * 0.5) - Math.max(rb.y, bb.y - tb * 0.5);
-      if (overlap < rb.h * 0.6) return;
-    } else {
-      // ruby line sits above the base line
-      gap = bb.y - (rb.y + rb.h);
-      overlap = Math.min(rb.x + rb.w, bb.x + bb.w + tb * 0.5) - Math.max(rb.x, bb.x - tb * 0.5);
-      if (overlap < rb.w * 0.6) return;
-    }
-    if (gap < -tb * 0.35 || gap > tb * 0.6) return;
-    if (gap < bestGap) { bestGap = gap; best = bi; }
+    if (tr > tb * 0.95 || rubySize > tb * 0.72) return;
+    // A tiny 1–3 character "line" right where furigana goes is furigana even if OCR misread it as kanji.
+    if (!mostlyKana && !(r.chars.length <= 3 && rubySize <= tb * 0.6)) return;
+    const L = Math.max(dist(b.quad[0], b.quad[1]), 1);
+    const axis = { x: (b.quad[1].x - b.quad[0].x) / L, y: (b.quad[1].y - b.quad[0].y) / L };
+    const nrm = { x: (b.quad[3].x - b.quad[0].x) / tb, y: (b.quad[3].y - b.quad[0].y) / tb };
+    const m0 = mix(b.quad[0], b.quad[3], 0.5);
+    const along = (p: Point) => ((p.x - m0.x) * axis.x + (p.y - m0.y) * axis.y) / L;
+    // overlap along the base
+    const [s0, s1] = rEnds.map(along).sort((x, y) => x - y);
+    const ov = Math.min(s1, 1) - Math.max(s0, 0);
+    if (ov < (s1 - s0) * 0.5 - 0.02) return;
+    // perpendicular offset of the ruby centre from the base centre line
+    const o = (rc.x - m0.x) * nrm.x + (rc.y - m0.y) * nrm.y;
+    const expected = -(tb + tr) / 2;
+    if (o > -tb * 0.2 || o < expected - tb * 0.45) return;
+    const score = Math.abs(o - expected);
+    if (score < bestScore) { bestScore = score; best = bi; }
   });
   return best;
 }
+
+const mix = (a: Point, b: Point, t: number): Point => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+const centre = (l: OcrLine): Point => ({
+  x: (l.quad[0].x + l.quad[1].x + l.quad[2].x + l.quad[3].x) / 4,
+  y: (l.quad[0].y + l.quad[1].y + l.quad[2].y + l.quad[3].y) / 4,
+});
 
 function charPositions(l: OcrLine): number[] {
   const n = l.chars.length;

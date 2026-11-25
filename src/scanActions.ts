@@ -2,6 +2,7 @@ import { localEngine, recognize, type Rect } from './lib/ocr/client';
 import { scan, settings, view, ocrState, showToast, textFromLines, type Scan } from './store';
 import type { OcrLine } from './lib/ocr/types';
 import { processFurigana } from './lib/ocr/ruby';
+import { layoutLines } from './lib/ocr/layout';
 
 const MAX_SIDE = 3000;
 
@@ -62,7 +63,7 @@ export async function openImage(blob: Blob, source = '') {
   const canvas = await toCanvas(blob);
   const url = await canvasUrl(canvas);
   if (scan.value?.url) URL.revokeObjectURL(scan.value.url);
-  scan.value = { canvas, url, lines: [], text: [], meta: [], lineOf: [], ruby: [], busy: false, error: null, source };
+  scan.value = { canvas, url, lines: [], text: [], meta: [], lineOf: [], ruby: [], geom: [], busy: false, error: null, source };
   view.value = 'scan';
   await runOcr(null);
 }
@@ -70,7 +71,7 @@ export async function openImage(blob: Blob, source = '') {
 export function openText(text: string, source = '') {
   if (scan.value?.url) URL.revokeObjectURL(scan.value.url);
   const cps = Array.from(text.normalize('NFC'));
-  scan.value = { canvas: null, url: null, lines: [], text: cps, meta: cps.map(() => null), lineOf: cps.map(() => -1), ruby: [], busy: false, error: null, source };
+  scan.value = { canvas: null, url: null, lines: [], text: cps, meta: cps.map(() => null), lineOf: cps.map(() => -1), ruby: [], geom: cps.map(() => null), busy: false, error: null, source };
   view.value = 'scan';
 }
 
@@ -83,7 +84,18 @@ export async function runOcr(rect: Rect | null) {
     const o = settings.value.ocr;
     const res = await recognize(s.canvas, rect, { ...o, engine: o.engine, cloudApiKey: o.cloudApiKey });
     const ms = res.ms;
-    const lines = processFurigana(res.lines, settings.value.display.furigana);
+    let found = processFurigana(res.lines, settings.value.display.furigana);
+    if (rect && s.lines.length) {
+      // Re-reading an area: replace only the lines inside it, keep the rest of the page.
+      const inside = (l: OcrLine) => {
+        const cx = l.box.x + l.box.w / 2, cy = l.box.y + l.box.h / 2;
+        return cx >= rect.x && cx <= rect.x + rect.w && cy >= rect.y && cy <= rect.y + rect.h;
+      };
+      found = [...s.lines.filter((l) => !inside(l)), ...found];
+    }
+    const lines = layoutLines(found);
+    // Exposed for debugging / tests
+    (globalThis as { __mmLastOcr?: unknown }).__mmLastOcr = { raw: res.lines, lines };
     setScan({ lines, ...textFromLines(lines), busy: false, timing: ms });
     if (!lines.length) showToast('No text found. Try selecting the text area or retaking the photo closer.', 'info');
   } catch (e) {
@@ -104,7 +116,7 @@ export async function rotateScan() {
   ctx.rotate(Math.PI / 2);
   ctx.drawImage(s.canvas, 0, 0);
   if (s.url) URL.revokeObjectURL(s.url);
-  scan.value = { ...s, canvas: c, url: await canvasUrl(c), lines: [], text: [], meta: [], lineOf: [], ruby: [] };
+  scan.value = { ...s, canvas: c, url: await canvasUrl(c), lines: [], text: [], meta: [], lineOf: [], ruby: [], geom: [] };
   await runOcr(null);
 }
 

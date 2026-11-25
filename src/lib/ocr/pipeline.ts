@@ -178,7 +178,22 @@ export function componentsToLines(comps: Component[], detW: number, detH: number
   for (const c of comps) {
     let { t, n, tmin, tmax, nmin, nmax } = c;
     let vertical = Math.abs(t.y) > Math.abs(t.x);
-    if (c.square && docVertical) {
+    // A square blob (one or two characters) has no direction of its own: follow the nearest
+    // real line (pages can mix vertical body text with horizontal headings), else the page.
+    let squareVertical = docVertical;
+    if (c.square && orientation === 'auto') {
+      let best = Infinity;
+      for (const o of nonSquare) {
+        // distance from the blob centre to the line's centre segment
+        const dx = c.cx - o.cx, dy = c.cy - o.cy;
+        const a = dx * o.t.x + dy * o.t.y;
+        const ac = Math.min(Math.max(a, o.tmin), o.tmax);
+        const d = Math.hypot(a - ac, dx * o.n.x + dy * o.n.y);
+        const reach = 4 * Math.max(o.nmax - o.nmin, c.nmax - c.nmin);
+        if (d < best && d < reach) { best = d; squareVertical = Math.abs(o.t.y) > Math.abs(o.t.x); }
+      }
+    }
+    if (c.square && squareVertical) {
       // Treat the blob as a short vertical column.
       t = { x: 0, y: 1 }; n = { x: -1, y: 0 };
       [tmin, tmax, nmin, nmax] = [c.nmin, c.nmax, -c.tmax, -c.tmin];
@@ -289,13 +304,19 @@ export async function restoreVerticalMarks(
     while (x < W && colInk[x]) x++;
     const x1 = x; // exclusive
     if (centers.some((c) => c >= x0 - 3 && c <= x1 + 3)) continue;
+    // Marks we recover (。、ー「」 small kana) occupy their own character cell; ink inside a
+    // recognized character's cell is a detached stroke of that character (e.g. one stroke of こ).
+    // Vertical 。、 hug the previous character (top-right of their own cell), so they get a smaller margin.
+    const mid = (x0 + x1) / 2;
+    const near = Math.min(Infinity, ...centers.map((c) => Math.abs(c - mid)));
     let y0 = H, y1 = -1;
     for (let xx = x0; xx < x1; xx++) for (let y = 0; y < H; y++) if (ink(xx, y)) { if (y < y0) y0 = y; if (y > y1) y1 = y; }
     const w = x1 - x0, h = y1 - y0 + 1;
     if (w < 3 && h < 3) continue;
     if (h > H * 0.8) continue; // fragment of a full-height glyph that was already read
     const t = tAt(x0, x1);
-    if (h <= Math.max(3, H * 0.12) && w >= H * 0.4) { found.push({ c: 'ー', p: 0.8, t }); continue; }
+    if (near < H * 0.3) continue;
+    if (h <= Math.max(3, H * 0.12) && w >= H * 0.4) { if (near >= H * 0.45) found.push({ c: 'ー', p: 0.8, t }); continue; }
     if (w <= H * 0.45 && h <= H * 0.45 && y1 <= H * 0.5) {
       const cx = Math.round((x0 + x1 - 1) / 2), cy = Math.round((y0 + y1) / 2);
       let filled = 0;
@@ -303,7 +324,9 @@ export async function restoreVerticalMarks(
       found.push({ c: filled <= 2 ? '。' : '、', p: 0.8, t });
       continue;
     }
-    if (w <= H * 0.4 && h >= H * 0.45) {
+    // Brackets sit inside the cell; ink touching the strip edge is a sliver of a neighbouring column.
+    if (near < H * 0.45) continue;
+    if (w <= H * 0.4 && h >= H * 0.45 && y0 > 1 && y1 < H - 2 && near >= H * 0.55) {
       // Corner brackets: 「 is ┌ (ink on left edge + top edge), 」 is ┘.
       const e = 1;
       const left = frac(x0, x0 + e, y0, y1), right = frac(x1 - 1 - e, x1 - 1, y0, y1);

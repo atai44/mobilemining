@@ -16,6 +16,11 @@ uploaded unless you turn on the optional cloud OCR engine. After the first load 
   - Every character keeps the model's runner-up guesses. Tap a misread character and pick the right one, or edit the text directly.
   - Drag a box to OCR a specific area (best for small text). Rotate, zoom, and force horizontal or vertical.
   - Optional **Google Cloud Vision** engine (your own API key) for even wider character coverage.
+- **Read on the photo itself**: scroll and pinch-zoom the photo (Ctrl/trackpad pinch on desktop) and tap any word
+  where it's printed. The word is highlighted in place. A text view (Aa) is still there for copying and editing.
+- **Mixed text directions** on one page work: a vertical body with a horizontal heading or captions, speech bubbles,
+  signs. Lines are grouped into blocks, each read in its own direction, and blocks are put in reading order. Sentences
+  never run across blocks, but words split across lines or columns within a block are still found.
 - **Furigana in photos** is recognized as furigana. It never gets spliced between lines of text. You can show it as ruby
   over the right kanji, remove it, or keep it. It's also available on cards as `{sentence-furigana}`.
 - **Pop-up dictionary** like Yomitan:
@@ -87,7 +92,8 @@ npm run build && npm run e2e   # headless Chromium: dictionary install, OCR of h
 | `src/lib/db.ts` | IndexedDB: dictionary install, lookups, mined cards |
 | `src/lib/anki.ts` | AnkiConnect / AnkiMobile / TSV, Yomitan-compatible field markers, duplicates |
 | `src/lib/yomitan/` | Yomitan dictionary import, structured-content rendering, settings import |
-| `src/lib/ocr/ruby.ts` | Furigana detection and attachment |
+| `src/lib/ocr/ruby.ts` | Furigana detection and attachment (works in each line's rotated frame, so tilted photos are fine) |
+| `src/lib/ocr/layout.ts` | Blocks and reading order for pages that mix horizontal and vertical text |
 | `scripts/` | Model download and dictionary build |
 
 ## Licenses and data

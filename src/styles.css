@@ -121,17 +121,21 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
 /* --- Scan view ---------------------------------------------------------------- */
 .scan { flex: 1; display: flex; flex-direction: column; min-height: 0; padding-bottom: var(--tabs-h); }
 .toolbar { display: flex; gap: 6px; align-items: center; padding: 6px 8px; background: var(--surface); border-bottom: 1px solid var(--border); overflow-x: auto; flex-shrink: 0; }
-.image-panel { flex: 0 0 42%; display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--border); background: #000; }
-.image-scroll { flex: 1; overflow: auto; min-height: 0; }
-.image-wrap { position: relative; margin: 0 auto; max-width: none; }
+.image-reader { flex: 1; display: flex; flex-direction: column; min-height: 0; background: #111; position: relative; }
+.image-scroll { flex: 1; overflow: auto; min-height: 0; touch-action: pan-x pan-y; position: relative; overscroll-behavior: contain; }
+.image-scroll.selecting { touch-action: none; }
+.image-wrap { position: relative; margin: 0 auto; max-width: none; background: #fff; }
 .image-wrap img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-select: none; }
 .overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
 .overlay.selecting { touch-action: none; cursor: crosshair; }
-.line-box { fill: rgba(251, 146, 60, 0.08); stroke: var(--line); stroke-width: 0.25%; vector-effect: non-scaling-stroke; cursor: pointer; }
-.line-box { stroke-width: 1.5px; }
-.line-box.active { fill: rgba(253, 224, 71, 0.35); stroke: #facc15; stroke-width: 2.5px; }
+.line-box { fill: none; stroke: var(--line); stroke-width: 1px; vector-effect: non-scaling-stroke; opacity: 0.35; pointer-events: none; }
+.ch { fill: transparent; cursor: pointer; }
+.ch.low { stroke: var(--accent); stroke-width: 1px; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; opacity: 0.8; }
+.ch.hl { fill: rgba(250, 204, 21, 0.45); }
+@media (hover: hover) { .ch:hover { fill: rgba(250, 204, 21, 0.18); } }
+.banner { padding: 8px 12px; background: var(--accent-soft); color: var(--text); border-bottom: 1px solid var(--border); }
 .sel-rect { fill: rgba(59, 130, 246, 0.15); stroke: #3b82f6; stroke-width: 2px; vector-effect: non-scaling-stroke; stroke-dasharray: 6 4; }
-.busy-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgba(0, 0, 0, 0.45); color: #fff; font-weight: 600; }
+.busy-overlay { position: absolute; inset: 0; z-index: 2; pointer-events: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgba(0, 0, 0, 0.45); color: #fff; font-weight: 600; }
 .spinner { width: 30px; height: 30px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, 0.3); border-top-color: #fff; animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -226,10 +230,7 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
 .toast-error { background: var(--err); color: #fff; }
 .toast-ok { background: var(--ok); color: #fff; }
 
-@media (min-width: 900px) {
-  .scan { flex-direction: row; }
-  .image-panel { flex: 0 0 50%; border-bottom: 0; border-right: 1px solid var(--border); }
-}
+
 
 /* --- Imported dictionaries / Anki v2 ------------------------------------------ */
 .popup-nav { display: flex; gap: 8px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--border); }

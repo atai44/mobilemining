@@ -17,6 +17,8 @@ export interface Scan {
   lineOf: number[];
   /** Furigana read from the photo, as code-point ranges of `text`. */
   ruby: { start: number; end: number; text: string }[];
+  /** Outline of each character on the photo (x0,y0,x1,y1,x2,y2,x3,y3), null for separators/edited text. */
+  geom: (number[] | null)[];
   busy: boolean;
   error: string | null;
   timing?: number;
@@ -54,21 +56,42 @@ export async function refreshDicts() {
   }
 }
 
-export function textFromLines(lines: OcrLine[]): Pick<Scan, 'text' | 'meta' | 'lineOf' | 'ruby'> {
+export function textFromLines(lines: (OcrLine & { sep?: string })[]): Pick<Scan, 'text' | 'meta' | 'lineOf' | 'ruby' | 'geom'> {
   const text: string[] = [];
   const meta: (OcrChar | null)[] = [];
   const lineOf: number[] = [];
+  const geom: (number[] | null)[] = [];
   const ruby: Scan['ruby'] = [];
   lines.forEach((l, li) => {
-    if (li > 0) { text.push('\n'); meta.push(null); lineOf.push(-1); }
+    const sep = li === 0 ? '' : l.sep ?? '\n';
+    for (const c of sep) { text.push(c); meta.push(null); lineOf.push(-1); geom.push(null); }
     const charStart: number[] = [];
-    for (const c of l.chars) {
+    const cells = charCells(l);
+    l.chars.forEach((c, ci) => {
       charStart.push(text.length);
       // A recognized "character" may be multiple code points only for unusual symbols; keep 1:1.
-      for (const cp of Array.from(c.c)) { text.push(cp); meta.push(c); lineOf.push(li); }
-    }
+      for (const cp of Array.from(c.c)) { text.push(cp); meta.push(c); lineOf.push(li); geom.push(cells[ci]); }
+    });
     charStart.push(text.length);
     for (const r of l.ruby ?? []) ruby.push({ start: charStart[r.from], end: charStart[r.to], text: r.text });
   });
-  return { text, meta, lineOf, ruby };
+  return { text, meta, lineOf, ruby, geom };
+}
+
+/** Outline of each character on the photo, from the line's quad and the characters' positions along it. */
+export function charCells(l: OcrLine): number[][] {
+  const n = l.chars.length;
+  if (!n) return [];
+  const us = l.chars.map((c, i) => c.u ?? (i + 0.5) / n);
+  const [q0, q1, , q3] = l.quad;
+  const P = (a: number, b: number) => [q0.x + a * (q1.x - q0.x) + b * (q3.x - q0.x), q0.y + a * (q1.y - q0.y) + b * (q3.y - q0.y)];
+  const len = Math.hypot(q1.x - q0.x, q1.y - q0.y) || 1;
+  const thick = Math.hypot(q3.x - q0.x, q3.y - q0.y);
+  // Half a character (≈ half the line thickness) on each side when there is no neighbour.
+  const half = Math.min(0.5, (thick * 0.5) / len);
+  return us.map((u, i) => {
+    const a0 = i > 0 ? (us[i - 1] + u) / 2 : Math.max(0, u - half);
+    const a1 = i < n - 1 ? (u + us[i + 1]) / 2 : Math.min(1, u + half);
+    return [...P(a0, 0), ...P(a1, 0), ...P(a1, 1), ...P(a0, 1)];
+  });
 }

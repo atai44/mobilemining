@@ -114,20 +114,29 @@ const mapping = await page.$$eval('[data-testid=anki-settings] .field-map', (els
 check(JSON.stringify(mapping) === JSON.stringify([['Word', '{expression}'], ['Reading', '{reading}'], ['Sentence', '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}'], ['Meaning', '{glossary}'], ['Picture', '{image}'], ['Audio', '{audio}']]), `fields auto-mapped: ${JSON.stringify(mapping)}`);
 await shot('02-settings');
 
+const toText = async () => { if (await page.$('[data-testid=show-text]')) await page.click('[data-testid=show-text]'); await page.waitForSelector('[data-testid=reader]'); };
+const toImage = async () => { if (await page.$('[data-testid=show-image]')) await page.click('[data-testid=show-image]'); await page.waitForSelector('[data-testid=image-reader]'); };
+const readerText = () => page.$eval('[data-testid=reader]', (el) => [...el.querySelectorAll('.line')].map((l) => [...l.querySelectorAll('span[data-i]')].map((s) => s.textContent).join('')).join('\n'));
+
 async function ocr(fixture) {
   await tab('Capture');
   const t = Date.now();
   await page.setInputFiles('[data-testid=file-input]', join(root, 'tests/fixtures', fixture));
-  await page.waitForSelector('[data-testid=reader] .line span', { timeout: 180_000 });
-  await page.waitForFunction(() => !document.querySelector('.busy-overlay'), null, { timeout: 180_000 });
-  const text = await page.$eval('[data-testid=reader]', (el) => [...el.querySelectorAll('.line')].map((l) => [...l.querySelectorAll('span[data-i]')].map((s) => s.textContent).join('')).join('\n'));
+  await page.waitForSelector('[data-testid=image-reader]');
+  await page.waitForFunction(() => !document.querySelector('.busy-overlay') && document.querySelector('[data-testid=image-reader] .ch'), null, { timeout: 180_000 });
+  await toText();
+  const text = await readerText();
   console.log(`  ${fixture} OCR in ${((Date.now() - t) / 1000).toFixed(1)}s:\n    ${text.replace(/\n/g, '\n    ')}`);
   return text;
 }
+/** Taps the nth occurrence of `ch` directly on the photo. */
 const tapChar = async (ch, nth = 0) => {
+  await toText();
   const idx = await page.$$eval('[data-testid=reader] span[data-i]', (els, [c, n]) => els.filter((e) => e.textContent === c)[n]?.dataset.i, [ch, nth]);
-  await page.click(`[data-i="${idx}"]`);
+  await toImage();
+  await page.locator(`[data-testid=image-reader] polygon[data-i="${idx}"]`).click({ force: true });
   await page.waitForSelector('[data-testid=popup] .entry, [data-testid=popup] .empty');
+  return Number(idx);
 };
 
 const expected = ['吾輩は猫である。名前はまだ無い。', 'どこで生れたかとんと見当がつかぬ。', '昨日は本を読まなかった。'];
@@ -212,6 +221,34 @@ await shot('06-settings-yomitan');
 
 // 6. Furigana: removed from the text, shown as ruby, available for cards
 const rubyExpected = ['昨日は図書館で本を読んだ。', '薔薇の花が咲いている。', '明日も学校に行きます。'];
+const denseText = '吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。吾輩はここで始めて人間というものを見た。しかもあとで聞くとそれは書生という人間中で一番獰悪な種族であったそうだ。';
+const denseRuby = ['吾輩[わがはい]', '猫[ねこ]', '名前[なまえ]', '見当[けんとう]', '薄暗[うすぐら]', '所[ところ]', '記憶[きおく]', '始[はじ]', '人間[にんげん]', '書生[しょせい]', '人間中[にんげんじゅう]', '種族[しゅぞく]'];
+for (const fx of ['dense-vertical.png', 'dense-vertical-tilt.png', 'dense-horizontal-tilt.png']) {
+  const text = await ocr(fx);
+  const sim = similarity(text.replace(/\s/g, ''), denseText);
+  check(sim > 0.97, `${fx}: dense furigana kept out of the text (${(sim * 100).toFixed(1)}%)`);
+  const rts = await page.$$eval('[data-testid=reader] ruby', (els) => els.map((r) => [...r.querySelectorAll('span[data-i]')].map((s) => s.textContent).join('') + '[' + r.querySelector('rt').textContent + ']'));
+  const got = denseRuby.filter((w) => rts.includes(w));
+  check(got.length === denseRuby.length, `${fx}: dense furigana on the right line (${got.length}/${denseRuby.length}) ${denseRuby.filter((w) => !rts.includes(w)).join(' ')}`);
+}
+
+// Mixed text directions: horizontal heading/caption around a vertical body
+{
+  const text = await ocr('mixed.png');
+  const flat = text.replace(/\s/g, '');
+  const parts = ['第一章猫の話', '吾輩は猫である。', '記憶している。', '注：作者は夏目漱石。', '写真：東京駅の様子'];
+  const pos = parts.map((p) => flat.indexOf(p));
+  check(pos.every((p, i) => p >= 0 && (i === 0 || p > pos[i - 1])), `mixed directions read in order: ${pos.join(',')}`);
+  check(/\n\n/.test(text), 'blocks separated by blank lines');
+  await tapChar('話');
+  await page.click('[data-testid=popup] [data-testid=edit-button] >> nth=0');
+  await page.waitForSelector('[data-testid=mine-sheet]');
+  const sent = await page.$eval('[data-testid=sentence]', (e) => e.value);
+  check(sent.replace(/\s/g, '') === '第一章猫の話', `heading sentence stays within its block: ${sent}`);
+  await page.click('.sheet-head [aria-label=Close]');
+  await shot('07-mixed');
+}
+
 for (const fx of ['ruby-vertical.png', 'ruby-horizontal.png']) {
   const text = await ocr(fx);
   const sim = similarity(text.replace(/\n/g, ''), rubyExpected.join(''));
@@ -225,8 +262,10 @@ for (const fx of ['ruby-vertical.png', 'ruby-horizontal.png']) {
 }
 
 // 7. Imported dictionary in the popup + mining with the imported Lapis setup
-await tapChar('読');
+const yomuIdx = await tapChar('読');
 await page.waitForSelector('[data-testid=popup] [data-dictionary="Test Dict"]');
+const hlCount = await page.$$eval('[data-testid=image-reader] .ch.hl', (els) => els.map((e) => e.dataset.i));
+check(hlCount.length === 3 && hlCount[0] === String(yomuIdx), `looked-up word highlighted on the photo (${hlCount.join(',')})`);
 const popupInfo = await page.$eval('[data-testid=popup]', (el) => ({
   text: el.innerText,
   img: el.querySelector('img.gloss-image')?.getAttribute('src') ?? '',
@@ -257,6 +296,19 @@ if (add) {
   check(f.PitchPosition === '1' && f.FreqSort === '830', 'pitch and frequency markers');
   check(/^<img src="mobilemining_\d+\.jpg">$/.test(f.Picture), '{screenshot} maps to the photo');
 }
+
+// Zoom (Ctrl+wheel / trackpad pinch)
+await page.keyboard.press('Escape');
+const w0 = await page.$eval('[data-testid=image-reader] .image-wrap', (e) => e.getBoundingClientRect().width);
+const box = await page.$eval('[data-testid=image-reader]', (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+await page.mouse.move(box.x, box.y);
+await page.keyboard.down('Control');
+await page.mouse.wheel(0, -150);
+await page.keyboard.up('Control');
+await page.waitForTimeout(200);
+const w1 = await page.$eval('[data-testid=image-reader] .image-wrap', (e) => e.getBoundingClientRect().width);
+check(w1 > w0 * 1.5, `photo zooms (${w0.toFixed(0)}px → ${w1.toFixed(0)}px)`);
+await shot('08b-zoomed');
 
 // 8. One-click note type setup
 await tab('Settings');
