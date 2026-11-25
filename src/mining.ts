@@ -1,7 +1,7 @@
 // Creating cards from a lookup: sentence context (with photo furigana), marker values,
 // image, and sending according to the configured Anki method.
 import { extractSentence, type TermResult } from './lib/lookup';
-import { ankiMobileUrl, buildMarkerValues, sendToAnkiConnect, type SendResult } from './lib/anki';
+import { ankiMobileUrl, buildMarkerValues, isAndroid, sendToAnkiConnect, shareToAnkiDroid, type SendResult } from './lib/anki';
 import { saveNote, tagDescriptions, type MinedNote } from './lib/db';
 import type { ImageMode } from './lib/settings';
 import { cropImage } from './scanActions';
@@ -53,9 +53,26 @@ export async function mineTerm(
 ): Promise<MineOutcome> {
   const st = settings.value;
   const note: MinedNote = { created: Date.now(), fields: values, image: image ?? undefined, status: 'pending' };
-  note.id = await saveNote(note);
   let sent: SendResult | null = null;
   let error: string | null = null;
+  if (st.anki.method === 'ankidroid') {
+    // Share first: the browser only allows it right after the tap.
+    try {
+      await shareToAnkiDroid(st, values);
+      note.status = 'added';
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') { error = String((e as Error).message ?? e); note.status = 'error'; note.error = error; }
+    }
+    note.id = await saveNote(note);
+    return { note, sent, error };
+  }
+  if (st.anki.method === 'ankimobile' && isAndroid()) {
+    error = 'AnkiMobile is iPhone/iPad only. On Android use AnkiDroid or AnkiConnect (Settings → Anki).';
+    note.status = 'error';
+    note.error = error;
+  }
+  note.id = await saveNote(note);
+  if (error) return { note, sent, error };
   if (st.anki.method === 'ankiconnect') {
     try {
       sent = await sendToAnkiConnect(st, note, force);

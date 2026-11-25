@@ -499,6 +499,29 @@ export function ankiMobileUrl(settings: Settings, values: Record<string, string>
   return `anki://x-callback-url/addnote?${p.toString().replace(/\+/g, '%20')}`;
 }
 
+// --- AnkiDroid (Android share sheet) ----------------------------------------------------------
+
+/** HTML → plain text (AnkiDroid's share target takes text). */
+function plainText(html: string): string {
+  const doc = new DOMParser().parseFromString(html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(div|p|li)>/gi, '\n'), 'text/html');
+  return (doc.body.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * Opens Android's share sheet; picking AnkiDroid opens its note editor with the subject in the
+ * first field and the text in the second (the most a web page can pass to AnkiDroid).
+ */
+export async function shareToAnkiDroid(settings: Settings, values: Record<string, string>): Promise<void> {
+  if (!navigator.share) throw new Error('Sharing is not available in this browser');
+  const v: Record<string, string> = { ...values };
+  for (const m of MEDIA_MARKERS) v[m] = '';
+  const [front = '', back = ''] = Object.values(settings.anki.droid.fields).map((t) => plainText(fillTemplate(t, v)));
+  await navigator.share({ title: front, text: back });
+}
+
+export const isAndroid = () => /Android/i.test(navigator.userAgent);
+export const isIOS = () => /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
 // --- TSV export -------------------------------------------------------------------------------
 
 const TSV_COLUMNS = ['expression', 'reading', 'furigana-plain', 'glossary', 'sentence-bold', 'sentence-furigana-plain', 'pitch-accent-positions', 'frequency-harmonic-rank', 'source', 'date'];

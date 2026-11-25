@@ -12,6 +12,7 @@
   --err: #b91c1c;
   --hl: #fde68a;
   --line: rgba(194, 65, 12, 0.55);
+  --box: #2563eb;
   --radius: 12px;
   --tabs-h: calc(58px + env(safe-area-inset-bottom));
   color-scheme: light;
@@ -32,6 +33,7 @@
     --err: #f87171;
     --hl: #7c5d12;
     --line: rgba(251, 146, 60, 0.6);
+    --box: #3b82f6;
     color-scheme: dark;
   }
 }
@@ -129,12 +131,13 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
 .image-wrap img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-select: none; }
 .overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
 .overlay.selecting { touch-action: none; cursor: crosshair; }
-.line-box { fill: none; stroke-width: 1.6px; vector-effect: non-scaling-stroke; opacity: 0.85; pointer-events: none; }
-.line-halo { fill: none; stroke: #fff; stroke-width: 4px; vector-effect: non-scaling-stroke; opacity: 0.55; pointer-events: none; }
+.line-box { fill: none; stroke: var(--box); stroke-width: 1.1px; vector-effect: non-scaling-stroke; opacity: 0.8; pointer-events: none; }
+.line-halo { fill: none; stroke: #fff; stroke-width: 2.6px; vector-effect: non-scaling-stroke; opacity: 0.4; pointer-events: none; }
 .box-halo { fill: none; stroke: #fff; stroke-width: 5.5px; vector-effect: non-scaling-stroke; opacity: 0.7; pointer-events: none; }
 .box-halo.selected { stroke-width: 7px; }
 .ch { fill: transparent; cursor: pointer; }
-.ch.low { stroke: var(--accent); stroke-width: 1px; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; opacity: 0.8; }
+/* Characters the OCR was unsure of: a light red tint */
+.ch.low { fill: rgba(239, 68, 68, 0.22); }
 .ch.hl { fill: rgba(250, 204, 21, 0.45); }
 @media (hover: hover) { .ch:hover { fill: rgba(250, 204, 21, 0.18); } }
 .banner { padding: 8px 12px; background: var(--accent-soft); color: var(--text); border-bottom: 1px solid var(--border); }
@@ -148,7 +151,7 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
 .reader .line { margin: 0 0 0.35em; overflow-wrap: anywhere; }
 .reader .line.blank { min-height: 0.8em; }
 .reader span { border-radius: 3px; cursor: pointer; }
-.reader span.low { text-decoration: underline dotted var(--accent); text-underline-offset: 0.25em; }
+.reader span.low { text-decoration: underline wavy rgba(239, 68, 68, 0.85); text-decoration-thickness: 1px; text-underline-offset: 0.25em; }
 .reader span.hl { background: var(--hl); }
 .reader.vertical { writing-mode: vertical-rl; overflow-x: auto; overflow-y: hidden; padding: 16px 12px; }
 .reader.vertical .line { margin: 0 0 0 0.35em; }

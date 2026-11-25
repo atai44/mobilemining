@@ -133,6 +133,18 @@ function keepVisible(container: HTMLElement, el: Element) {
 // read in the background; tapping a part that hasn't been read yet reads it first.
 
 const MAX_ZOOM = 8;
+/** A line's quad grown by a little of its thickness on every side. */
+function outset(q: Point[]): Point[] {
+  const t = Math.hypot(q[3].x - q[0].x, q[3].y - q[0].y) || 1, len = Math.hypot(q[1].x - q[0].x, q[1].y - q[0].y) || 1;
+  const pad = t * 0.12;
+  const u = { x: ((q[1].x - q[0].x) / len) * pad, y: ((q[1].y - q[0].y) / len) * pad };
+  const v = { x: ((q[3].x - q[0].x) / t) * pad, y: ((q[3].y - q[0].y) / t) * pad };
+  return [
+    { x: q[0].x - u.x - v.x, y: q[0].y - u.y - v.y }, { x: q[1].x + u.x - v.x, y: q[1].y + u.y - v.y },
+    { x: q[2].x + u.x + v.x, y: q[2].y + u.y + v.y }, { x: q[3].x - u.x + v.x, y: q[3].y - u.y + v.y },
+  ];
+}
+
 const SECTION_COLORS = ['#e8590c', '#1c7ed6', '#2f9e44', '#ae3ec9', '#f08c00', '#0c8599', '#d6336c', '#5c940d'];
 
 function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
@@ -401,14 +413,13 @@ function ImageReader({ highlight, onTap, onEmptyTap, onShowText }: {
             {s.pending.map((p) => (
               <polygon key={p.key} class={`pending${p.busy ? ' busy' : ''}`} points={p.quad.map((q) => `${q.x},${q.y}`).join(' ')} />
             ))}
-            {/* Line outlines in their section's colour, on a light halo so they show on any background. */}
+            {/* Line outlines, drawn just outside the text so they don't cover it, on a faint halo so they show on any background. */}
             {!sections && s.lines.map((l, i) => {
-              const pts = l.quad.map((p) => `${p.x},${p.y}`).join(' ');
-              const block = (l as LaidOutLine).block ?? 0;
+              const pts = outset(l.quad).map((p) => `${p.x},${p.y}`).join(' ');
               return (
                 <g key={`l${l.key ?? i}`}>
                   <polygon class="line-halo" points={pts} />
-                  <polygon class="line-box" points={pts} style={{ stroke: SECTION_COLORS[block % SECTION_COLORS.length] }} />
+                  <polygon class="line-box" points={pts} />
                 </g>
               );
             })}
@@ -547,7 +558,7 @@ function AreaLayer({ svgRef, W, selected, drawing, flash, onSelect }: {
       {s.areas.filter((x) => x.id === selected).map((info) => {
         const a = live?.id === info.id ? { ...info, ...live.geom } : info;
         const pts = areaCorners({ ...a, id: a.id });
-        const color = SECTION_COLORS[Math.max(0, info.section) % SECTION_COLORS.length];
+        const color = 'var(--box)';
         const sel = selected === info.id;
         const top = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
         const up = rotate(0, -px(34), a.angle);

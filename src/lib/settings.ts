@@ -1,6 +1,6 @@
 import type { Orientation } from './ocr/types';
 
-export type AnkiMethod = 'ankiconnect' | 'ankimobile' | 'local';
+export type AnkiMethod = 'ankiconnect' | 'ankimobile' | 'ankidroid' | 'local';
 export type ImageMode = 'page' | 'line' | 'none';
 export type FuriganaMode = 'ruby' | 'remove' | 'keep';
 export type DuplicateBehavior = 'prevent' | 'new' | 'overwrite';
@@ -53,6 +53,8 @@ export interface Settings {
     image: ImageMode;
     audio: boolean;
     mobile: { profile: string; deck: string; model: string; fields: Record<string, string> };
+    /** AnkiDroid via Android's share sheet: only the first two fields of its note editor. */
+    droid: { fields: Record<string, string> };
     /** Note type for the TSV export (empty fields: a fixed set of columns). */
     export: { deck: string; model: string; fields: Record<string, string> };
   };
@@ -86,6 +88,7 @@ export const DEFAULT_SETTINGS: Settings = {
       model: 'Basic',
       fields: { Front: '{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}', Back: '{furigana}<br>{glossary}' },
     },
+    droid: { fields: { Front: '{sentence}', Back: '{expression}【{reading}】\n{glossary-plain-no-dictionary}' } },
     export: { deck: '', model: '', fields: {} },
   },
 };

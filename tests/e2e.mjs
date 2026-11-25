@@ -657,6 +657,22 @@ await shot('09-mined');
   check(similarity(s.replace(/\n/g, ''), expected.join('')) > 0.95, `scanned PDF read by OCR (${s.replace(/\n/g, '/')})`);
 }
 
+// 12. Android: AnkiMobile is flagged as iOS-only; AnkiDroid gets the card through the share sheet
+{
+  await page.evaluate(() => { navigator.share = async (d) => { window.__shared = d; }; });
+  await tab('Settings');
+  await page.click('.segmented >> text=AnkiMobile');
+  const warned = !!(await page.$('[data-testid=ankimobile-android]'));
+  await page.click('.segmented >> text=AnkiDroid');
+  await ocr('horizontal.png');
+  await tapChar('読');
+  await page.click('[data-testid=popup] [data-testid=mine-button] >> nth=0');
+  await page.waitForFunction(() => window.__shared, null, { timeout: 10_000 }).catch(() => {});
+  const shared = await page.evaluate(() => window.__shared ?? null);
+  check(warned && shared?.title === '昨日は本を読まなかった。' && shared.text.startsWith('読む【よむ】') && shared.text.includes('to read') && !shared.text.includes('<'),
+    `AnkiDroid share: front/back as text (${JSON.stringify(shared)?.slice(0, 120)}); AnkiMobile flagged on Android: ${warned}`);
+}
+
 await browser.close();
 server.close();
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');

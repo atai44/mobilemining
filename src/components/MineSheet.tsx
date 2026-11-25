@@ -47,7 +47,7 @@ export function MineSheet({ req, onClose }: { req: MineRequest; onClose: () => v
 
   const r = req.result;
   const method = st.anki.method;
-  const actionLabel = method === 'ankiconnect' ? 'Add' : method === 'ankimobile' ? 'AnkiMobile' : 'Save';
+  const actionLabel = method === 'ankiconnect' ? 'Add' : method === 'ankimobile' ? 'AnkiMobile' : method === 'ankidroid' ? 'AnkiDroid' : 'Save';
 
   const submit = async (force?: 'new' | 'overwrite') => {
     if (!values) return;
@@ -65,7 +65,7 @@ export function MineSheet({ req, onClose }: { req: MineRequest; onClose: () => v
     }
   };
 
-  const fieldPreview = method === 'ankiconnect' ? st.anki.fields : method === 'ankimobile' ? st.anki.mobile.fields : null;
+  const fieldPreview = method === 'ankiconnect' ? st.anki.fields : method === 'ankimobile' ? st.anki.mobile.fields : method === 'ankidroid' ? st.anki.droid.fields : null;
   const preview = (tpl: string) => {
     if (/\{(image|screenshot|clipboard-image)\}/.test(tpl)) return '🖼 image';
     if (tpl.includes('{audio}')) return '🔊 audio';
@@ -125,7 +125,7 @@ export function MineSheet({ req, onClose }: { req: MineRequest; onClose: () => v
             </table>
           </details>
         )}
-        {method === 'ankimobile' && image && <p class="muted small">Image kept in Mined only</p>}
+        {(method === 'ankimobile' || method === 'ankidroid') && image && <p class="muted small">Image kept in Mined only</p>}
         {dupes.length > 0 && (
           <p class="small dupe-note">
             Already in Anki.{' '}

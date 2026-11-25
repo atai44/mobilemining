@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { settings, showToast, updateSettings } from '../../store';
-import { client, createMobileMiningModel, dictSlug, guessMarker, MARKERS, MM_FIELDS, MM_MODEL } from '../../lib/anki';
+import { client, createMobileMiningModel, isAndroid, isIOS, dictSlug, guessMarker, MARKERS, MM_FIELDS, MM_MODEL } from '../../lib/anki';
 import type { AnkiMethod, DuplicateBehavior, ImageMode, Settings } from '../../lib/settings';
 import { applyYomitanProfile, parseYomitanSettings, type ImportSummary, type YomitanSettingsFile } from '../../lib/yomitan/settingsImport';
 import { installedDictionaries, refreshDictionaries } from '../../dictionaries';
@@ -92,6 +92,7 @@ export function AnkiSettings() {
           {([
             ['ankiconnect', 'AnkiConnect'],
             ['ankimobile', 'AnkiMobile'],
+            ['ankidroid', 'AnkiDroid'],
             ['local', 'Export'],
           ] as [AnkiMethod, string][]).map(([m, label]) => (
             <button key={m} class={a.method === m ? 'active' : ''} onClick={() => updateSettings((s) => (s.anki.method = m))}>{label}</button>
@@ -195,12 +196,24 @@ export function AnkiSettings() {
 
       {a.method === 'ankimobile' && (
         <>
-          <p class="muted small">No images or audio</p>
+          {isAndroid() ? <p class="error small" data-testid="ankimobile-android">AnkiMobile is iPhone/iPad only. On Android use AnkiDroid or AnkiConnect.</p> : <p class="muted small">No images or audio</p>}
           <label class="field">
             <span>Profile</span>
             <input value={a.mobile.profile} onInput={(e) => updateSettings((s) => (s.anki.mobile.profile = (e.target as HTMLInputElement).value))} />
           </label>
           <NoteTypeEditor pick={(s) => s.anki.mobile} markers={dynamicMarkers} testid="mobile" />
+        </>
+      )}
+
+      {a.method === 'ankidroid' && (
+        <>
+          {isIOS() && <p class="error small">AnkiDroid is Android only.</p>}
+          <p class="muted small">Share → AnkiDroid fills the first two fields of its note editor (it keeps its last note type and deck). Text only. For every field, images and audio, use AnkiConnect Android.</p>
+          <FieldMapping
+            fields={a.droid.fields}
+            extraMarkers={dynamicMarkers}
+            onChange={(f, v) => updateSettings((s) => (s.anki.droid.fields[f] = v))}
+          />
         </>
       )}
 
