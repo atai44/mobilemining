@@ -20,7 +20,7 @@ const shotsIdx = process.argv.indexOf('--screenshots');
 const shots = shotsIdx > 0 ? process.argv[shotsIdx + 1] : null;
 if (shots) await mkdir(shots, { recursive: true });
 
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 const server = createServer(async (req, res) => {
   let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   if (p.endsWith('/')) p += 'index.html';
@@ -565,6 +565,7 @@ await shot('09-mined');
   const t = Date.now();
   const v = await pdfText('text-vertical.pdf');
   check(v.replace(/\n/g, '') === expected.join('') && Date.now() - t < 15_000, `PDF text layer, vertical (${v.replace(/\n/g, '/')})`);
+  await toImage();
   check((await page.$eval('[data-testid=pager]', (e) => e.innerText)).replace(/\s/g, '') === '‹1/2›', 'PDF pager');
   await page.click('[data-testid=next-page]');
   await page.waitForFunction(() => document.querySelector('[data-testid=pager]')?.innerText.includes('2/2'));
@@ -574,6 +575,7 @@ await shot('09-mined');
   check(h.replace(/\n/g, '') === expected.join(''), `PDF page 2, horizontal (${h.replace(/\n/g, '/')})`);
   await pdfText('text-ruby.pdf');
   const rts = await page.$$eval('[data-testid=reader] rt', (e) => e.map((x) => x.textContent));
+  await toImage();
   check(['きのう', 'としょかん', 'ばら'].every((r) => rts.includes(r)) && !(await page.$('[data-testid=pager]')), `PDF ruby kept as furigana (${rts.join(' ')})`);
   const s = await pdfText('scanned.pdf');
   check(similarity(s.replace(/\n/g, ''), expected.join('')) > 0.95, `scanned PDF read by OCR (${s.replace(/\n/g, '/')})`);

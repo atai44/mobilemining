@@ -69,6 +69,11 @@ export default defineConfig({
   base: './',
   plugins: [preact(), serviceWorker()],
   worker: { format: 'es' },
-  build: { target: 'es2022', chunkSizeWarningLimit: 1500 },
+  build: {
+    target: 'es2022',
+    chunkSizeWarningLimit: 1500,
+    // pdf.js's worker is an .mjs file; emit it as .js so any static host serves it with a JavaScript MIME type.
+    rollupOptions: { output: { assetFileNames: (a) => (a.names?.[0]?.endsWith('.mjs') ? 'assets/[name]-[hash].js' : 'assets/[name]-[hash][extname]') } },
+  },
   optimizeDeps: { exclude: ['onnxruntime-web'] },
 });
