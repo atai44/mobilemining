@@ -8,7 +8,7 @@ import { areaCorners, areaOverlap, areasIntersect, inArea, quadCentre, type Area
 export { areaCorners, areasIntersect, inArea, type Area };
 import { lookupPrefix } from './lib/db';
 import { openPdf, renderPage } from './lib/pdf';
-import type { PDFDocumentProxy } from 'pdfjs-dist';
+import type { PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { checkFurigana, type FuriganaCheck } from './lib/rubyCheck';
 import { dicts } from './store';
 

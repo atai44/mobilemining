@@ -1,14 +1,15 @@
 // PDF support (pdf.js, loaded on demand). Pages with a text layer (e-books, articles) use the
 // PDF's own text and glyph positions: exact, instant, no OCR. Scanned pages fall back to OCR.
 import type { OcrChar, OcrLine, Point } from './ocr/types';
-import type { PDFDocumentProxy } from 'pdfjs-dist';
+import type { PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
-type PdfJs = typeof import('pdfjs-dist');
+// Legacy build: polyfills newer JS (e.g. Map#getOrInsertComputed) that Safari and older browsers lack.
+type PdfJs = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 let lib: Promise<PdfJs> | null = null;
 
 function pdfjs(): Promise<PdfJs> {
   lib ??= (async () => {
-    const [L, worker] = await Promise.all([import('pdfjs-dist'), import('pdfjs-dist/build/pdf.worker.min.mjs?url')]);
+    const [L, worker] = await Promise.all([import('pdfjs-dist/legacy/build/pdf.mjs'), import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')]);
     L.GlobalWorkerOptions.workerSrc = worker.default;
     return L;
   })();
