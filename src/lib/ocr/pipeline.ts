@@ -36,76 +36,138 @@ interface Component {
   tmin: number; tmax: number; nmin: number; nmax: number;
   score: number;
   square: boolean;
+  /** Centre line following the text (det px), in reading order. */
+  mid: Point[];
+  /** True text thickness (det px): median local width, unaffected by curvature or slant. */
+  width: number;
+  pix: number[];
+}
+
+/** Connected components of pixels above `thresh` (optionally only within `region`). */
+function labelComponents(prob: Float32Array, w: number, h: number, thresh: number, region?: number[]): number[][] {
+  const allowed = region ? new Uint8Array(w * h) : null;
+  if (allowed) for (const i of region!) allowed[i] = 1;
+  const ok = (i: number) => prob[i] > thresh && (!allowed || allowed[i] === 1);
+  const seen = new Uint8Array(w * h);
+  const stack = new Int32Array(region ? region.length + 1 : w * h);
+  const out: number[][] = [];
+  const starts = region ?? null;
+  const n = starts ? starts.length : w * h;
+  for (let k = 0; k < n; k++) {
+    const start = starts ? starts[k] : k;
+    if (seen[start] || !ok(start)) continue;
+    let sp = 0;
+    stack[sp++] = start;
+    seen[start] = 1;
+    const pix: number[] = [];
+    while (sp) {
+      const idx = stack[--sp];
+      pix.push(idx);
+      const x = idx % w;
+      if (x > 0 && !seen[idx - 1] && ok(idx - 1)) { seen[idx - 1] = 1; stack[sp++] = idx - 1; }
+      if (x < w - 1 && !seen[idx + 1] && ok(idx + 1)) { seen[idx + 1] = 1; stack[sp++] = idx + 1; }
+      if (idx >= w && !seen[idx - w] && ok(idx - w)) { seen[idx - w] = 1; stack[sp++] = idx - w; }
+      if (idx < w * (h - 1) && !seen[idx + w] && ok(idx + w)) { seen[idx + w] = 1; stack[sp++] = idx + w; }
+    }
+    out.push(pix);
+  }
+  return out;
+}
+
+/** Summarizes a pixel group as an oriented rectangle plus a curve-following centre line. */
+function summarize(pix: number[], prob: Float32Array, w: number, boxThresh: number, unclipRatio: number): Component | null {
+  const count = pix.length;
+  if (count < 6) return null;
+  let sum = 0, sx = 0, sy = 0;
+  for (const idx of pix) { sum += prob[idx]; sx += idx % w; sy += Math.floor(idx / w); }
+  const score = sum / count;
+  if (score < boxThresh) return null;
+  const cx = sx / count, cy = sy / count;
+  // Second moments -> principal axis.
+  let sxx = 0, syy = 0, sxy = 0;
+  for (const idx of pix) {
+    const x = (idx % w) - cx, y = Math.floor(idx / w) - cy;
+    sxx += x * x; syy += y * y; sxy += x * y;
+  }
+  let theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  // Snap near-axis-aligned lines to avoid needless resampling blur.
+  const deg = (theta * 180) / Math.PI;
+  if (Math.abs(deg) < 2) theta = 0;
+  else if (Math.abs(Math.abs(deg) - 90) < 2) theta = Math.sign(deg) * Math.PI / 2;
+  let ax = { x: Math.cos(theta), y: Math.sin(theta) };
+  let ext = extents(pix, w, cx, cy, ax);
+  let square = false;
+  // Single characters / blobs: PCA direction is meaningless; fall back to the axis-aligned box.
+  if ((ext.amax - ext.amin + 1) / (ext.bmax - ext.bmin + 1) < 1.5) {
+    ax = { x: 1, y: 0 };
+    ext = extents(pix, w, cx, cy, ax);
+    square = true;
+  }
+  // Long axis is ax; orient it for reading: horizontal lines left->right, vertical columns top->bottom.
+  let t = ax;
+  const vertical = !square && Math.abs(ax.y) > Math.abs(ax.x);
+  if ((vertical && t.y < 0) || (!vertical && t.x < 0)) t = { x: -t.x, y: -t.y };
+  const flip = t !== ax;
+  let tmin = flip ? -ext.amax : ext.amin, tmax = flip ? -ext.amin : ext.amax;
+  // normal = t rotated 90° clockwise (screen coords)
+  const nrm = { x: -t.y, y: t.x };
+  // b-axis of extents is (-ax.y, ax.x); if t was flipped the normal flips too.
+  let nmin = flip ? -ext.bmax : ext.bmin, nmax = flip ? -ext.bmin : ext.bmax;
+  // pixels are 1 unit wide
+  tmin -= 0.5; tmax += 0.5; nmin -= 0.5; nmax += 0.5;
+  const lw = tmax - tmin, lh = nmax - nmin;
+  if (Math.min(lw, lh) < 3) return null;
+
+  // Local cross-sections along the line: centre and width of the text in each slice.
+  const bin = Math.max(3, Math.min(lh, lw) / 2);
+  const nb = Math.max(1, Math.ceil(lw / bin));
+  const bMin = new Float32Array(nb).fill(Infinity), bMax = new Float32Array(nb).fill(-Infinity), bSum = new Float32Array(nb), bCnt = new Int32Array(nb);
+  for (const idx of pix) {
+    const x = (idx % w) - cx, y = Math.floor(idx / w) - cy;
+    const a = x * t.x + y * t.y, b = x * nrm.x + y * nrm.y;
+    const k = Math.min(nb - 1, Math.max(0, Math.floor((a - tmin) / bin)));
+    if (b < bMin[k]) bMin[k] = b;
+    if (b > bMax[k]) bMax[k] = b;
+    bSum[k] += b; bCnt[k]++;
+  }
+  const widths: number[] = [];
+  const mid: Point[] = [];
+  for (let k = 0; k < nb; k++) {
+    if (bCnt[k] < 3) continue;
+    widths.push(bMax[k] - bMin[k] + 1);
+    const a = tmin + (k + 0.5) * bin, b = bSum[k] / bCnt[k];
+    mid.push({ x: cx + a * t.x + b * nrm.x, y: cy + a * t.y + b * nrm.y });
+  }
+  widths.sort((p, q) => p - q);
+  const kw = square ? Math.min(lw, lh) : widths[Math.floor(widths.length / 2)] ?? lh;
+  // Unclip by the true (kernel) width, not the curvature-inflated box thickness.
+  const d = (lw * kw * unclipRatio) / (2 * (lw + kw));
+  return {
+    cx, cy, t, n: nrm, tmin: tmin - d, tmax: tmax + d, nmin: nmin - d, nmax: nmax + d, score, square,
+    mid: mid.length ? mid : [{ x: cx, y: cy }], width: kw + 2 * d, pix,
+  };
 }
 
 /** Connected components on the thresholded probability map, each summarized as an oriented rectangle. */
 export function findComponents(prob: Float32Array, w: number, h: number, thresh: number, boxThresh: number, unclipRatio: number): Component[] {
-  const labels = new Int32Array(w * h);
-  const stack = new Int32Array(w * h);
-  const comps: Component[] = [];
-  let label = 0;
-  for (let start = 0; start < w * h; start++) {
-    if (labels[start] || prob[start] <= thresh) continue;
-    label++;
-    let sp = 0;
-    stack[sp++] = start;
-    labels[start] = label;
-    const pix: number[] = [];
-    let sum = 0, sx = 0, sy = 0;
-    while (sp) {
-      const idx = stack[--sp];
-      pix.push(idx);
-      sum += prob[idx];
-      const x = idx % w, y = (idx - x) / w;
-      sx += x; sy += y;
-      if (x > 0 && !labels[idx - 1] && prob[idx - 1] > thresh) { labels[idx - 1] = label; stack[sp++] = idx - 1; }
-      if (x < w - 1 && !labels[idx + 1] && prob[idx + 1] > thresh) { labels[idx + 1] = label; stack[sp++] = idx + 1; }
-      if (y > 0 && !labels[idx - w] && prob[idx - w] > thresh) { labels[idx - w] = label; stack[sp++] = idx - w; }
-      if (y < h - 1 && !labels[idx + w] && prob[idx + w] > thresh) { labels[idx + w] = label; stack[sp++] = idx + w; }
+  const comps = labelComponents(prob, w, h, thresh).map((pix) => summarize(pix, prob, w, boxThresh, unclipRatio)).filter((c): c is Component => !!c);
+  // Lines much wider than the page's typical line are usually two columns (or a column and its
+  // furigana) that touch: split them by re-thresholding just that region more strictly.
+  const lineWidths = comps.filter((c) => !c.square && c.tmax - c.tmin > 4 * c.width).map((c) => c.width).sort((a, b) => a - b);
+  const median = lineWidths[Math.floor(lineWidths.length / 2)];
+  if (!median || lineWidths.length < 3) return comps.map(({ pix: _p, ...c }) => ({ ...c, pix: [] }));
+  const out: Component[] = [];
+  for (const c of comps) {
+    if (c.square || c.width < median * 1.45) { out.push(c); continue; }
+    let parts: Component[] | null = null;
+    for (const t2 of [0.35, 0.5, 0.65]) {
+      const subs = labelComponents(prob, w, h, t2, c.pix).map((pix) => summarize(pix, prob, w, boxThresh * 0.8, unclipRatio)).filter((x): x is Component => !!x);
+      const big = subs.filter((x) => x.pix.length > c.pix.length * 0.08);
+      if (big.length >= 2 && big.every((x) => x.width < median * 1.3)) { parts = subs; break; }
     }
-    const count = pix.length;
-    if (count < 6) continue;
-    const score = sum / count;
-    if (score < boxThresh) continue;
-    const cx = sx / count, cy = sy / count;
-    // Second moments -> principal axis.
-    let sxx = 0, syy = 0, sxy = 0;
-    for (const idx of pix) {
-      const x = (idx % w) - cx, y = Math.floor(idx / w) - cy;
-      sxx += x * x; syy += y * y; sxy += x * y;
-    }
-    let theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);
-    // Snap near-axis-aligned lines to avoid needless resampling blur.
-    const deg = (theta * 180) / Math.PI;
-    if (Math.abs(deg) < 2) theta = 0;
-    else if (Math.abs(Math.abs(deg) - 90) < 2) theta = Math.sign(deg) * Math.PI / 2;
-    let ax = { x: Math.cos(theta), y: Math.sin(theta) };
-    let ext = extents(pix, w, cx, cy, ax);
-    let square = false;
-    // Single characters / blobs: PCA direction is meaningless; fall back to the axis-aligned box.
-    if ((ext.amax - ext.amin + 1) / (ext.bmax - ext.bmin + 1) < 1.5) {
-      ax = { x: 1, y: 0 };
-      ext = extents(pix, w, cx, cy, ax);
-      square = true;
-    }
-    // Long axis is ax; orient it for reading: horizontal lines left->right, vertical columns top->bottom.
-    let t = ax;
-    const vertical = !square && Math.abs(ax.y) > Math.abs(ax.x);
-    if ((vertical && t.y < 0) || (!vertical && t.x < 0)) t = { x: -t.x, y: -t.y };
-    const flip = t !== ax;
-    let tmin = flip ? -ext.amax : ext.amin, tmax = flip ? -ext.amin : ext.amax;
-    // normal = t rotated 90° clockwise (screen coords)
-    const nrm = { x: -t.y, y: t.x };
-    // b-axis of extents is (-ax.y, ax.x); if t was flipped the normal flips too.
-    let nmin = flip ? -ext.bmax : ext.bmin, nmax = flip ? -ext.bmin : ext.bmax;
-    // pixels are 1 unit wide
-    tmin -= 0.5; tmax += 0.5; nmin -= 0.5; nmax += 0.5;
-    const lw = tmax - tmin, lh = nmax - nmin;
-    if (Math.min(lw, lh) < 3) continue;
-    const d = (lw * lh * unclipRatio) / (2 * (lw + lh));
-    comps.push({ cx, cy, t, n: nrm, tmin: tmin - d, tmax: tmax + d, nmin: nmin - d, nmax: nmax + d, score, square });
+    out.push(...(parts ?? [c]));
   }
-  return comps;
+  return out.map(({ pix: _p, ...c }) => ({ ...c, pix: [] }));
 }
 
 function extents(pix: number[], w: number, cx: number, cy: number, a: Point) {
@@ -166,6 +228,10 @@ export interface LineGeom {
   quad: [Point, Point, Point, Point];
   vertical: boolean;
   score: number;
+  /** Curve-following centre line (src px), in reading order. */
+  mid?: Point[];
+  /** True text thickness (src px). */
+  width?: number;
 }
 
 /** Converts det-space components to source-space line quads, deciding orientation for square blobs. */
@@ -211,7 +277,11 @@ export function componentsToLines(comps: Component[], detW: number, detH: number
       x: Math.min(Math.max((c.cx + 0.5 + a * t.x + b * n.x) * sx, 0), srcW),
       y: Math.min(Math.max((c.cy + 0.5 + a * t.y + b * n.y) * sy, 0), srcH),
     });
-    lines.push({ quad: [P(tmin, nmin), P(tmax, nmin), P(tmax, nmax), P(tmin, nmax)], vertical, score: c.score });
+    const mid = c.mid
+      .map((p) => ({ x: Math.min(Math.max((p.x + 0.5) * sx, 0), srcW), y: Math.min(Math.max((p.y + 0.5) * sy, 0), srcH) }))
+      .sort((a, b) => (a.x - b.x) * t.x + (a.y - b.y) * t.y);
+    const width = c.square ? Math.min(tmax - tmin, nmax - nmin) * (sx + sy) / 2 : c.width * (Math.abs(n.x) * sx + Math.abs(n.y) * sy);
+    lines.push({ quad: [P(tmin, nmin), P(tmax, nmin), P(tmax, nmax), P(tmin, nmax)], vertical, score: c.score, mid, width });
   }
   return lines;
 }
@@ -426,7 +496,7 @@ export async function recognizeLine(src: RGBAImage, g: LineGeom, runRec: RunMode
   const T = out.dims[1];
   const chars: OcrChar[] = decoded.map(({ t, ...c }) => ({ ...c, u: (t + 0.5) / T }));
   if (!chars.length) return null;
-  return { text: chars.map((c) => c.c).join(''), chars, vertical: g.vertical, quad: g.quad, box: quadBox(g.quad), score: g.score };
+  return { text: chars.map((c) => c.c).join(''), chars, vertical: g.vertical, quad: g.quad, box: quadBox(g.quad), score: g.score, mid: g.mid, width: g.width };
 }
 
 export async function runOcr(
@@ -446,4 +516,54 @@ export async function runOcr(
     if (l) lines.push(l);
   }
   return { lines: sortLines(lines), ms: { det: t1 - t0, rec: performance.now() - t1 } };
+}
+
+// --- Page orientation -----------------------------------------------------------------------
+
+const ORI_MEAN = [0.485, 0.456, 0.406];
+const ORI_STD = [0.229, 0.224, 0.225];
+
+/** CHW BGR tensor of a square RGBA crop rotated `quarter` × 90° counter-clockwise. */
+function oriTensor(img: RGBAImage, quarter: number, out: Float32Array, offset: number) {
+  const n = img.width; // square
+  const plane = n * n;
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      // source pixel for output (x, y) after CCW rotation
+      let sx = x, sy = y;
+      if (quarter === 1) { sx = n - 1 - y; sy = x; }
+      else if (quarter === 2) { sx = n - 1 - x; sy = n - 1 - y; }
+      else if (quarter === 3) { sx = y; sy = n - 1 - x; }
+      const si = (sy * n + sx) * 4;
+      const o = offset + y * n + x;
+      out[o] = (img.data[si + 2] / 255 - ORI_MEAN[0]) / ORI_STD[0];
+      out[o + plane] = (img.data[si + 1] / 255 - ORI_MEAN[1]) / ORI_STD[1];
+      out[o + 2 * plane] = (img.data[si] / 255 - ORI_MEAN[2]) / ORI_STD[2];
+    }
+  }
+}
+
+/**
+ * Page orientation from PP-LCNet doc_ori. Each crop is classified at all four rotations and the
+ * rotations vote (a single centre crop is easily fooled by margins, pictures or curled pages).
+ * Returns the counter-clockwise rotation (0/90/180/270) that makes the page upright, with scores.
+ */
+export async function pageOrientation(crops: RGBAImage[], runOri: RunModel): Promise<{ rotate: number; scores: number[] }> {
+  const n = crops[0].width;
+  const batch = crops.length * 4;
+  const data = new Float32Array(batch * 3 * n * n);
+  crops.forEach((c, ci) => { for (let q = 0; q < 4; q++) oriTensor(c, q, data, (ci * 4 + q) * 3 * n * n); });
+  const out = await runOri({ data, dims: [batch, 3, n, n] });
+  const scores = [0, 0, 0, 0];
+  for (let ci = 0; ci < crops.length; ci++) {
+    for (let r = 0; r < 4; r++) {
+      const p = out.data.subarray((ci * 4 + r) * 4, (ci * 4 + r) * 4 + 4);
+      // crop rotated by r quarters predicts label L => page needs (L + r) quarters CCW
+      for (let k = 0; k < 4; k++) scores[k] += p[(k - r + 4) % 4];
+    }
+  }
+  const total = crops.length * 4;
+  const norm = scores.map((v) => v / total);
+  const best = norm.indexOf(Math.max(...norm));
+  return { rotate: best * 90, scores: norm };
 }

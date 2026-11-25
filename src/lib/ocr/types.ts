@@ -29,12 +29,17 @@ export interface OcrLine {
   ruby?: Ruby[];
   /** Stable identity (detected line index, or area re-read id) used by section edits. */
   key?: string;
+  /** Curve-following centre line (src px) and true text thickness, from detection. */
+  mid?: Point[];
+  width?: number;
 }
 
 export interface LineGeomMsg {
   quad: [Point, Point, Point, Point];
   vertical: boolean;
   score: number;
+  mid?: Point[];
+  width?: number;
 }
 
 export type Orientation = 'auto' | 'horizontal' | 'vertical';
@@ -51,7 +56,8 @@ export type WorkerRequest =
   /** Keep `src` in the worker for the detect/rec requests that follow. */
   | { type: 'image'; id: number; imageId: number; src: RGBAImage }
   | { type: 'detect'; id: number; imageId: number; det: RGBAImage; opts: OcrOptions }
-  | { type: 'rec'; id: number; imageId: number; geoms: LineGeomMsg[] };
+  | { type: 'rec'; id: number; imageId: number; geoms: LineGeomMsg[] }
+  | { type: 'orient'; id: number; crops: RGBAImage[] };
 
 export type WorkerResponse =
   | { type: 'progress'; file: string; loaded: number; total: number }
@@ -60,4 +66,5 @@ export type WorkerResponse =
   | { type: 'result'; id: number; lines: OcrLine[]; ms: { det: number; rec: number } }
   | { type: 'ok'; id: number }
   | { type: 'detected'; id: number; geoms: LineGeomMsg[] }
-  | { type: 'recognized'; id: number; lines: (OcrLine | null)[] };
+  | { type: 'recognized'; id: number; lines: (OcrLine | null)[] }
+  | { type: 'oriented'; id: number; rotate: number; scores: number[] };

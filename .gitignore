@@ -6,3 +6,4 @@ public/ort/
 public/dict/
 test-results/
 *.log
+tests/photos/

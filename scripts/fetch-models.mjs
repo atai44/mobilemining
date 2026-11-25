@@ -14,6 +14,8 @@ const HF = 'https://huggingface.co/PaddlePaddle';
 const MODELS = [
   { repo: 'PP-OCRv6_small_det_onnx', out: 'det.onnx' },
   { repo: 'PP-OCRv6_small_rec_onnx', out: 'rec.onnx', yml: true },
+  // Page orientation (0/90/180/270°) for sideways or upside-down photos
+  { repo: 'PP-LCNet_x1_0_doc_ori_onnx', out: 'ori.onnx' },
 ];
 
 async function exists(p) {

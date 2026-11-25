@@ -35,6 +35,7 @@ export function SettingsView() {
             <option value="vertical">Vertical (縦書き)</option>
           </select>
         </label>
+        <Toggle label="Turn sideways / upside-down photos upright automatically" checked={st.ocr.autoRotate} onChange={(v) => updateSettings((s) => (s.ocr.autoRotate = v))} />
         <label class="field">
           <span>Detection resolution: {st.ocr.detMaxSide}px</span>
           <input type="range" min={960} max={2560} step={64} value={st.ocr.detMaxSide} onInput={(e) => updateSettings((s) => (s.ocr.detMaxSide = Number((e.target as HTMLInputElement).value)))} />

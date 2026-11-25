@@ -233,3 +233,10 @@ export async function deleteNote(id: number): Promise<void> {
   tx.objectStore('notes').delete(id);
   await txDone(tx);
 }
+
+/** Entries with a key starting with `prefix` (e.g. 這入 → 這入る), for checking furigana. */
+export async function lookupPrefix(prefix: string, limit = 60): Promise<Entry[]> {
+  const db = await openDb();
+  const index = db.transaction('terms').objectStore('terms').index('keys');
+  return (await promisify(index.getAll(IDBKeyRange.bound(prefix, prefix + '￿'), limit))) as Entry[];
+}

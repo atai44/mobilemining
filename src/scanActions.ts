@@ -4,6 +4,9 @@ import type { OcrLine, Orientation, Point } from './lib/ocr/types';
 import { processFurigana } from './lib/ocr/ruby';
 import { arrange, type LaidOutLine } from './lib/ocr/layout';
 import { OcrSession, pointInQuad } from './lib/ocr/session';
+import { lookupPrefix } from './lib/db';
+import { checkFurigana, type FuriganaCheck } from './lib/rubyCheck';
+import { dicts } from './store';
 
 const MAX_SIDE = 3000;
 
@@ -80,11 +83,86 @@ interface Page {
 }
 const freshPage = (): Page => ({ session: null, extra: [], replaced: new Set(), deleted: new Set(), sections: null, seq: 0, edited: false, error: null, phase: 'models' });
 let page: Page = freshPage();
+/** Photos whose orientation was already checked (so manual rotation isn't undone). */
+const checkedOrientation = new WeakSet<HTMLCanvasElement>();
+
+/** Rotates a canvas counter-clockwise by 90/180/270°. */
+function rotateCanvas(src: HTMLCanvasElement, ccw: number): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  const quarter = ((ccw / 90) % 4 + 4) % 4;
+  c.width = quarter % 2 ? src.height : src.width;
+  c.height = quarter % 2 ? src.width : src.height;
+  const ctx = c.getContext('2d')!;
+  ctx.translate(c.width / 2, c.height / 2);
+  ctx.rotate((-quarter * Math.PI) / 2);
+  ctx.drawImage(src, -src.width / 2, -src.height / 2);
+  return c;
+}
 
 let rebuildTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleRebuild() {
   if (rebuildTimer) return;
   rebuildTimer = setTimeout(() => { rebuildTimer = null; rebuild(); }, 120);
+}
+
+// Furigana readings checked against the dictionary: "base|ocr" -> corrected reading (or null).
+const rubyChecked = new Map<string, FuriganaCheck | null>();
+const rubyAlts = new Map<string, string[][]>();
+const rubyQueue = new Set<string>();
+let rubyBusy = false;
+
+async function checkRubyQueue() {
+  if (rubyBusy || !dicts.value?.jmdict) return;
+  rubyBusy = true;
+  try {
+    while (rubyQueue.size) {
+      const key = rubyQueue.values().next().value as string;
+      rubyQueue.delete(key);
+      const [base, ocr] = key.split('|');
+      try {
+        rubyChecked.set(key, await checkFurigana(base, ocr, (p) => lookupPrefix(p), rubyAlts.get(key)));
+      } catch {
+        rubyChecked.set(key, null);
+      }
+    }
+  } finally {
+    rubyBusy = false;
+  }
+  scheduleRebuild();
+}
+
+/** Applies dictionary-checked readings to furigana, queueing unchecked ones. */
+function checkRuby(lines: OcrLine[]): OcrLine[] {
+  let queued = false;
+  const out = lines.map((l) => {
+    if (!l.ruby?.length) return l;
+    return {
+      ...l,
+      ruby: l.ruby.flatMap((r) => {
+        const base = l.chars.slice(r.from, r.to).map((c) => c.c).join('');
+        const key = base + '|' + r.text;
+        const res = rubyChecked.get(key);
+        if (res === undefined) {
+          rubyAlts.set(key, l.chars.slice(r.from, r.to).map((c) => (c.alts ?? []).filter((a) => a.p >= 0.01).map((a) => a.c)));
+          rubyQueue.add(key);
+          queued = true;
+          return [r];
+        }
+        if (!res) return [r];
+        if (res.fix) {
+          // Persist the corrected kanji in the OCR result (old one kept as an alternative).
+          const ch = l.chars[r.from + res.fix.i];
+          if (ch && ch.c !== res.fix.c) {
+            ch.alts = [{ c: ch.c, p: ch.p }, ...(ch.alts ?? []).filter((a) => a.c !== res.fix!.c)];
+            ch.c = res.fix.c;
+          }
+        }
+        return res.parts.map((f) => ({ from: r.from + f.from, to: r.from + f.to, text: f.text }));
+      }),
+    };
+  });
+  if (queued) checkRubyQueue();
+  return out;
 }
 
 /** Recomputes the page (text, furigana, sections, pending lines) from OCR results and edits. */
@@ -94,7 +172,7 @@ export function rebuild() {
   const sess = page.session;
   const fromSession = sess ? sess.lines.filter((l) => l.result && !page.replaced.has(l.key)).map((l) => l.result!) : [];
   const all = [...fromSession, ...page.extra].filter((l) => !page.deleted.has(l.key!));
-  const lines = arrange(processFurigana(all, settings.value.display.furigana), page.sections);
+  const lines = arrange(checkRuby(processFurigana(all, settings.value.display.furigana)), page.sections);
   const pending = sess ? sess.lines.filter((l) => l.status !== 'done' && !page.replaced.has(l.key)).map((l) => ({ key: l.key, quad: l.geom.quad, busy: l.status === 'busy' })) : [];
   const total = sess?.lines.length ?? 0;
   const phase = page.error ? 'error' : page.phase === 'read' && sess?.finished ? 'done' : page.phase;
@@ -149,11 +227,27 @@ export function startAnalysis() {
     return;
   }
   ensureOcrEngine()
-    .then(() => {
+    .then(async () => {
       if (scan.value?.canvas !== canvas) return;
       page.phase = 'detect';
       rebuild();
-      const sess = new OcrSession(canvas, { ...o }, () => scheduleRebuild());
+      let cv = canvas;
+      // Photos often come out sideways or upside down: turn the page upright first (once per photo).
+      if (!checkedOrientation.has(canvas) && settings.value.ocr.autoRotate) {
+        checkedOrientation.add(canvas);
+        const { rotate, scores } = await localEngine.orientation(canvas);
+        const sorted = [...scores].sort((a, b) => b - a);
+        if (rotate && sorted[0] > 0.45 && sorted[0] - sorted[1] > 0.15 && scan.value?.canvas === canvas) {
+          cv = rotateCanvas(canvas, rotate);
+          checkedOrientation.add(cv);
+          const old = scan.value.url;
+          scan.value = { ...scan.value, canvas: cv, url: await canvasUrl(cv) };
+          if (old) URL.revokeObjectURL(old);
+          showToast(`Turned the photo ${rotate === 180 ? 'upside down' : rotate === 90 ? 'left' : 'right'} to make the text upright (⟳ to change)`, 'info');
+        }
+      }
+      if (scan.value?.canvas !== cv) return;
+      const sess = new OcrSession(cv, { ...o }, () => scheduleRebuild());
       page.session = sess;
       sess.ready.then(() => { if (page.session === sess) { page.phase = 'read'; rebuild(); } });
     })
@@ -335,6 +429,67 @@ export async function redirectSection(i: number, orientation: 'horizontal' | 've
   await runOcr(rect, orientation, lines.map((l) => l.key!));
 }
 
+/** Keys of read and not-yet-read lines whose centre lies inside `rect`. */
+function keysInside(rect: Rect): string[] {
+  const inside = (q: Point[]) => {
+    const cx = (q[0].x + q[1].x + q[2].x + q[3].x) / 4, cy = (q[0].y + q[1].y + q[2].y + q[3].y) / 4;
+    return cx >= rect.x && cx <= rect.x + rect.w && cy >= rect.y && cy <= rect.y + rect.h;
+  };
+  const keys = ((scan.value?.lines ?? []) as LaidOutLine[]).filter((l) => inside(l.quad)).map((l) => l.key!);
+  for (const p of scan.value?.pending ?? []) if (inside(p.quad)) keys.push(p.key);
+  return keys;
+}
+
+/**
+ * Sets the box of section `i` (or creates a new section when i is null): the lines inside the box
+ * belong to it; lines pushed out of it become their own section right after it.
+ * Returns false when there is no text in the box (the caller can read the area instead).
+ */
+export function setSectionBox(i: number | null, rect: Rect): boolean {
+  const inside = new Set(keysInside(rect));
+  if (!inside.size) return false;
+  editSections((secs) => {
+    const out: string[][] = [];
+    secs.forEach((g, gi) => {
+      if (gi === i) {
+        out.push([...inside]);
+        const left = g.filter((k) => !inside.has(k));
+        if (left.length) out.push(left);
+      } else {
+        out.push(g.filter((k) => !inside.has(k)));
+      }
+    });
+    if (i === null) out.push([...inside]);
+    return out;
+  });
+  return true;
+}
+
+/** New section from a drawn box; reads the area when nothing was detected there. */
+export async function newSectionFromBox(rect: Rect) {
+  if (setSectionBox(null, rect)) return;
+  if (!page.sections) page.sections = currentSections();
+  await runOcr(rect);
+}
+
+/** Reads section i's box again (catches text the detector missed). */
+export async function rereadSection(i: number, rect?: Rect) {
+  const s = scan.value;
+  if (!s?.canvas) return;
+  const lines = (s.lines as LaidOutLine[]).filter((l) => l.block === i);
+  if (!page.sections) page.sections = currentSections();
+  const r = rect ?? sectionRect(lines, s.canvas.width, s.canvas.height);
+  if (r) await runOcr(r, undefined, lines.map((l) => l.key!));
+}
+
+function sectionRect(lines: OcrLine[], W: number, H: number): Rect | null {
+  if (!lines.length) return null;
+  const xs = lines.flatMap((l) => l.quad.map((p) => p.x)), ys = lines.flatMap((l) => l.quad.map((p) => p.y));
+  const pad = 6;
+  const x = Math.max(0, Math.min(...xs) - pad), y = Math.max(0, Math.min(...ys) - pad);
+  return { x, y, w: Math.min(W - x, Math.max(...xs) - x + pad), h: Math.min(H - y, Math.max(...ys) - y + pad) };
+}
+
 export function resetSections() {
   page.sections = null;
   page.deleted.clear();
@@ -344,13 +499,8 @@ export function resetSections() {
 export async function rotateScan() {
   const s = scan.value;
   if (!s?.canvas) return;
-  const c = document.createElement('canvas');
-  c.width = s.canvas.height;
-  c.height = s.canvas.width;
-  const ctx = c.getContext('2d')!;
-  ctx.translate(c.width, 0);
-  ctx.rotate(Math.PI / 2);
-  ctx.drawImage(s.canvas, 0, 0);
+  const c = rotateCanvas(s.canvas, 270); // 90° clockwise
+  checkedOrientation.add(c);
   if (s.url) URL.revokeObjectURL(s.url);
   scan.value = { ...s, canvas: c, url: await canvasUrl(c), lines: [], text: [], meta: [], lineOf: [], ruby: [], geom: [], pending: [] };
   startAnalysis();

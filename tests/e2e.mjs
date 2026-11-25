@@ -121,7 +121,7 @@ const readerText = () => page.$eval('[data-testid=reader]', (el) => [...el.query
 async function ocr(fixture) {
   await tab('Capture');
   const t = Date.now();
-  await page.setInputFiles('[data-testid=file-input]', join(root, 'tests/fixtures', fixture));
+  await page.setInputFiles('[data-testid=file-input]', fixture.startsWith('/') ? fixture : join(root, 'tests/fixtures', fixture));
   await page.waitForSelector('[data-testid=image-reader]');
   await page.waitForFunction(() => !document.querySelector('[data-testid=ocr-progress]') && document.querySelector('[data-testid=image-reader] .ch'), null, { timeout: 180_000 });
   await toText();
@@ -228,6 +228,8 @@ for (const fx of ['dense-vertical.png', 'dense-vertical-tilt.png', 'dense-horizo
   const sim = similarity(text.replace(/\s/g, ''), denseText);
   check(sim > 0.97, `${fx}: dense furigana kept out of the text (${(sim * 100).toFixed(1)}%)`);
   const rts = await page.$$eval('[data-testid=reader] ruby', (els) => els.map((r) => [...r.querySelectorAll('span[data-i]')].map((s) => s.textContent).join('') + '[' + r.querySelector('rt').textContent + ']'));
+  // 人間中 may also come out as 人間[にんげん] + 中[じゅう] (both correct)
+  if (rts.includes('人間[にんげん]') && rts.includes('中[じゅう]')) rts.push('人間中[にんげんじゅう]');
   const got = denseRuby.filter((w) => rts.includes(w));
   check(got.length === denseRuby.length, `${fx}: dense furigana on the right line (${got.length}/${denseRuby.length}) ${denseRuby.filter((w) => !rts.includes(w)).join(' ')}`);
 }
@@ -302,7 +304,54 @@ for (const fx of ['dense-vertical.png', 'dense-vertical-tilt.png', 'dense-horizo
   await page.waitForFunction(() => !document.querySelector('[data-testid=ocr-progress]'), null, { timeout: 60_000 });
   check((await count()) >= 4, 're-reading a section with a forced direction');
   await page.click('[data-testid=sec-reset]');
+
+  // Resize a section's box: drag the note box's top-right handle over the heading
+  await pickSection(2);
+  const handle = await page.$eval('g[data-section="2"] [data-handle=ne]', (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  const headTop = await page.$eval('g[data-section="0"] rect.section-box', (e) => { const r = e.getBoundingClientRect(); return { x: r.right - 2, y: r.top + 2 }; });
+  await page.mouse.move(handle.x, handle.y);
+  await page.mouse.down();
+  await page.mouse.move((handle.x + headTop.x) / 2, (handle.y + headTop.y) / 2, { steps: 4 });
+  await page.mouse.move(headTop.x, headTop.y - 4, { steps: 4 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const merged = await flatText();
+  check((await count()) === 3 && /注：作者は夏目漱石。第一章猫の話|第一章猫の話注：作者は夏目漱石。/.test(merged.replace(/写真.*/, '').replace(/吾輩.*?している。/, '')), `resizing a section box takes in the text inside it (${await count()} sections)`);
+  // Draw a new section around the caption's date
+  await page.click('[data-testid=sec-reset]');
+  await page.click('[data-testid=sec-new]');
+  const cap = await page.$eval('g[data-section="3"] rect.section-box', (e) => { const r = e.getBoundingClientRect(); return { x0: r.x, y0: r.y, x1: r.right, y1: r.bottom }; });
+  await page.mouse.move(cap.x0 + 2, cap.y0 + 2);
+  await page.mouse.down();
+  await page.mouse.move(cap.x1 - 2, cap.y1 - 2, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  check((await count()) === 4, 'drawing a box over a whole section keeps it as one section');
+  await pickSection(3);
+  await page.click('[data-testid=sec-reread]');
+  await page.waitForFunction(() => !document.querySelector('[data-testid=ocr-progress]'), null, { timeout: 60_000 });
+  check((await flatText()).includes('写真：東京駅'), 're-reading a section box');
+  await page.click('[data-testid=sec-reset]');
   await page.click('.section-bar >> text=Done');
+}
+
+// Optional: real photos (not in the repo). MM_PHOTOS=dir with 1.jpg 2.jpg 3.jpg (sideways book pages)
+if (process.env.MM_PHOTOS) {
+  const want = {
+    '1.jpg': ['片岡[かたおか]', '斜面[しゃめん]', '浚稽山[しゆんけいさん]', '敵塁[てきるい]', '帷[とばり]', '匈奴[きょうど]', '天子[てんし]', '天明[てんめい]', '有様[ありさま]', '震駭[しんがい]'],
+    '2.jpg': ['我慢[がまん]', '猶更[なおさら]', '疳性[かんしょう]', '講釈[こうしゃく]', '説諭[せつゆ]', '一寸[ちょっと]', '這入[はい]', '豪傑[ごうけつ]', '随分[ずいぶん]', '田舎[いなか]'],
+    '3.jpg': ['挨拶[あいさつ]', '壻[むこ]', '騙[だま]', '面目[めんぼく]', '一旦[いったん]', '纏[まと]', '傾[かし]', '独語[ひとりごと]'],
+  };
+  for (const [f, rubies] of Object.entries(want)) {
+    await ocr(join(process.env.MM_PHOTOS, f));
+    await page.waitForTimeout(1500); // dictionary check of furigana
+    await toImage(); await toText();
+    const dims = await page.evaluate(() => { const i = document.querySelector('[data-testid=reader]'); return i ? 1 : 0; });
+    const rts = await page.$$eval('[data-testid=reader] ruby', (els) => els.map((r) => [...r.querySelectorAll('span[data-i]')].map((s) => s.textContent).join('') + '[' + r.querySelector('rt').textContent + ']'));
+    const got = rubies.filter((w) => rts.includes(w));
+    check(got.length >= rubies.length - 1, `photo ${f}: upright and furigana placed (${got.length}/${rubies.length}) ${rubies.filter((w) => !rts.includes(w)).join(' ')}`);
+    void dims;
+  }
 }
 
 for (const fx of ['ruby-vertical.png', 'ruby-horizontal.png']) {

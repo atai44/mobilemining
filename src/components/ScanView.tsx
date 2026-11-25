@@ -4,6 +4,7 @@ import { scan, settings, updateSettings, view, showToast, ocrState, locate, inde
 import {
   runOcr, rotateScan, startAnalysis, focusAt, setEditedText,
   mergeSections, moveSection, splitSection, deleteSection, redirectSection, resetSections,
+  setSectionBox, newSectionFromBox, rereadSection,
 } from '../scanActions';
 import type { LaidOutLine } from '../lib/ocr/layout';
 import type { TermResult } from '../lib/lookup';
@@ -98,7 +99,8 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
   const svgRef = useRef<SVGSVGElement>(null);
   const [zoom, setZoom] = useState(1);
   const [fit, setFit] = useState(1); // zoom at which the whole page is visible
-  const [selecting, setSelecting] = useState(false);
+  const [draw, setDraw] = useState<'area' | 'section' | null>(null);
+  const selecting = draw !== null;
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [focus, setFocus] = useState<Point | null>(null);
   const [sections, setSections] = useState(false);
@@ -203,8 +205,10 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
     rect.h = Math.min(rect.h, H - rect.y);
     setDrag(null);
     if (rect.w > 12 && rect.h > 12) {
-      setSelecting(false);
-      runOcr(rect);
+      const mode = draw;
+      setDraw(null);
+      if (mode === 'section') newSectionFromBox(rect);
+      else runOcr(rect);
     }
   };
 
@@ -248,10 +252,10 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
   return (
     <section class="image-reader">
       <div class="toolbar">
-        <button class={`button small ${selecting ? 'primary' : ''}`} onClick={() => { setSections(false); setSelecting(!selecting); }} title="Drag a box around text to read just that area" data-testid="select-area">
-          ⬚ {selecting ? 'Drag…' : 'Area'}
+        <button class={`button small ${draw === 'area' ? 'primary' : ''}`} onClick={() => { setSections(false); setDraw(draw === 'area' ? null : 'area'); }} title="Drag a box around text to read just that area" data-testid="select-area">
+          ⬚ {draw === 'area' ? 'Drag…' : 'Area'}
         </button>
-        <button class={`button small ${sections ? 'primary' : ''}`} onClick={() => { setSelecting(false); setSections(!sections); }} title="Fix how the page is split into sections and their reading order" data-testid="sections">
+        <button class={`button small ${sections ? 'primary' : ''}`} onClick={() => { setDraw(null); setSections(!sections); }} title="Fix how the page is split into sections and their reading order" data-testid="sections">
           § Sections
         </button>
         <button class="button small" onClick={() => startAnalysis()} title="Read the whole photo again">↻</button>
@@ -310,11 +314,11 @@ function ImageReader({ highlight, onTap, onInteract, onShowText }: {
             {drag && (
               <rect class="sel-rect" x={Math.min(drag.x0, drag.x1)} y={Math.min(drag.y0, drag.y1)} width={Math.abs(drag.x1 - drag.x0)} height={Math.abs(drag.y1 - drag.y0)} />
             )}
-            {sections && <SectionOverlay unit={unit} />}
+            {sections && <SectionOverlay unit={unit} toImage={toImage} W={W} H={H} />}
           </svg>
         </div>
       </div>
-      {sections && <SectionBar onDone={() => setSections(false)} />}
+      {sections && <SectionBar drawing={draw === 'section'} onDraw={() => setDraw(draw === 'section' ? null : 'section')} onDone={() => { setDraw(null); setSections(false); }} />}
       {!pg || pg.phase !== 'done' || s.lines.length || s.busy ? null : <div class="banner small">{s.error ?? 'No text found. Try ⬚ Area around the text, or retake the photo closer.'}</div>}
     </section>
   );
@@ -356,26 +360,59 @@ function sectionShapes(lines: LaidOutLine[]) {
   });
 }
 
-function SectionOverlay({ unit }: { unit: number }) {
+type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+type Box = { x0: number; y0: number; x1: number; y1: number };
+
+function SectionOverlay({ unit, toImage, W, H }: { unit: number; toImage: (e: PointerEvent) => Point; W: number; H: number }) {
   const s = scan.value!;
   const sel = selection.value;
   const shapes = sectionShapes(s.lines as LaidOutLine[]);
+  const [resize, setResize] = useState<{ handle: Handle; box: Box } | null>(null);
   const pick = (block: number, key: string) => {
     if (sel.merging && sel.block >= 0 && block !== sel.block) {
       mergeSections(sel.block, block);
       selection.value = { block: Math.min(sel.block, block), key: '', merging: false };
     } else selection.value = { block, key, merging: false };
   };
+  const pad = unit * 0.6;
+  const startResize = (handle: Handle, box: Box) => (e: PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    setResize({ handle, box });
+  };
+  const moveResize = (e: PointerEvent) => {
+    if (!resize) return;
+    const p = toImage(e);
+    const b = { ...resize.box };
+    const x = Math.min(Math.max(p.x, 0), W), y = Math.min(Math.max(p.y, 0), H);
+    if (resize.handle.includes('w')) b.x0 = Math.min(x, b.x1 - 10);
+    if (resize.handle.includes('e')) b.x1 = Math.max(x, b.x0 + 10);
+    if (resize.handle.includes('n')) b.y0 = Math.min(y, b.y1 - 10);
+    if (resize.handle.includes('s')) b.y1 = Math.max(y, b.y0 + 10);
+    setResize({ ...resize, box: b });
+  };
+  const endResize = () => {
+    if (!resize) return;
+    const b = resize.box;
+    setResize(null);
+    const rect = { x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0 };
+    if (!setSectionBox(sel.block, rect)) showToast('No text in that box — use ↻ Re-read box to read it', 'info');
+  };
   return (
     <g class="sections">
       {shapes.map((sh) => {
         const color = SECTION_COLORS[sh.block % SECTION_COLORS.length];
         const selected = sh.block === sel.block;
-        const pad = unit * 0.6;
-        const bx = sh.vertical ? sh.x1 + pad : sh.x0 - pad, by = sh.y0 - pad;
+        const box: Box = selected && resize ? resize.box : { x0: sh.x0 - pad, y0: sh.y0 - pad, x1: sh.x1 + pad, y1: sh.y1 + pad };
+        const bx = sh.vertical ? box.x1 : box.x0, by = box.y0;
+        const handles: [Handle, number, number][] = [
+          ['nw', box.x0, box.y0], ['n', (box.x0 + box.x1) / 2, box.y0], ['ne', box.x1, box.y0], ['e', box.x1, (box.y0 + box.y1) / 2],
+          ['se', box.x1, box.y1], ['s', (box.x0 + box.x1) / 2, box.y1], ['sw', box.x0, box.y1], ['w', box.x0, (box.y0 + box.y1) / 2],
+        ];
         return (
           <g key={sh.block} data-section={sh.block}>
-            <rect x={sh.x0 - pad} y={sh.y0 - pad} width={sh.x1 - sh.x0 + 2 * pad} height={sh.y1 - sh.y0 + 2 * pad} rx={unit * 0.6}
+            <rect x={box.x0} y={box.y0} width={box.x1 - box.x0} height={box.y1 - box.y0} rx={unit * 0.6}
               class={`section-box${selected ? ' selected' : ''}`} style={{ stroke: color, fill: color }} />
             {sh.lines.map((l) => (
               <polygon key={l.key} class={`section-line${selected && l.key === sel.key ? ' split-at' : ''}`} points={l.quad.map((p) => `${p.x},${p.y}`).join(' ')}
@@ -383,6 +420,10 @@ function SectionOverlay({ unit }: { unit: number }) {
             ))}
             <circle cx={bx} cy={by} r={unit * 1.7} style={{ fill: color }} class="section-badge" />
             <text x={bx} y={by} font-size={unit * 1.9} class="section-num" text-anchor="middle" dominant-baseline="central">{sh.block + 1}</text>
+            {selected && !sel.merging && handles.map(([h, x, y]) => (
+              <rect key={h} class="section-handle" data-handle={h} x={x - unit * 1.1} y={y - unit * 1.1} width={unit * 2.2} height={unit * 2.2} rx={unit * 0.4}
+                style={{ stroke: color }} onPointerDown={startResize(h, box)} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={() => setResize(null)} />
+            ))}
           </g>
         );
       })}
@@ -390,7 +431,7 @@ function SectionOverlay({ unit }: { unit: number }) {
   );
 }
 
-function SectionBar({ onDone }: { onDone: () => void }) {
+function SectionBar({ onDone, onDraw, drawing }: { onDone: () => void; onDraw: () => void; drawing: boolean }) {
   const s = scan.value!;
   const sel = selection.value;
   const count = new Set((s.lines as LaidOutLine[]).map((l) => l.block)).size;
@@ -399,8 +440,10 @@ function SectionBar({ onDone }: { onDone: () => void }) {
   const set = (v: Partial<typeof sel>) => (selection.value = { ...sel, ...v });
   return (
     <div class="section-bar" data-testid="section-bar">
-      {!valid ? (
-        <span class="small">Tap a section to change it. Numbers show the reading order.</span>
+      {drawing ? (
+        <span class="small">Drag a box around the text for the new section…</span>
+      ) : !valid ? (
+        <span class="small">Tap a section to change it; drag its handles to resize its box. Numbers show the reading order.</span>
       ) : sel.merging ? (
         <span class="small">Tap the section to merge with section {sel.block + 1}… <button class="button small" onClick={() => set({ merging: false })}>Cancel</button></span>
       ) : (
@@ -410,12 +453,14 @@ function SectionBar({ onDone }: { onDone: () => void }) {
           <button class="button small" disabled={sel.block >= count - 1} onClick={() => { moveSection(sel.block, 1); set({ block: sel.block + 1 }); }} title="Read later" data-testid="sec-later">Later ▶</button>
           <button class="button small" onClick={() => set({ merging: true })} data-testid="sec-merge">Merge…</button>
           <button class="button small" disabled={!sel.key || sel.key === firstKey} onClick={() => { splitSection(sel.block, sel.key); set({ block: sel.block + 1 }); }} title="Start a new section at the line you tapped" data-testid="sec-split">Split here</button>
+          <button class="button small" onClick={() => rereadSection(sel.block)} title="Read this box again (finds text that was missed)" data-testid="sec-reread">↻ Re-read box</button>
           <button class="button small" onClick={() => redirectSection(sel.block, 'vertical')} title="Re-read this section as vertical text" data-testid="sec-vertical">縦</button>
           <button class="button small" onClick={() => redirectSection(sel.block, 'horizontal')} title="Re-read this section as horizontal text" data-testid="sec-horizontal">横</button>
           <button class="button small danger" onClick={() => { deleteSection(sel.block); set({ block: -1, key: '' }); }} title="Ignore this section" data-testid="sec-delete">🗑</button>
         </div>
       )}
       <div class="row">
+        <button class={`button small ${drawing ? 'primary' : ''}`} onClick={onDraw} title="Draw a box for a new section" data-testid="sec-new">＋ New</button>
         {s.sectionsEdited && <button class="button small" onClick={() => { resetSections(); set({ block: -1, key: '' }); }} data-testid="sec-reset">Reset</button>}
         <button class="button small primary" onClick={() => { set({ block: -1, key: '', merging: false }); onDone(); }}>Done</button>
       </div>

@@ -21,6 +21,8 @@ export interface Settings {
     boxThresh: number;
     unclipRatio: number;
     cloudApiKey: string;
+    /** Detect sideways / upside-down photos and turn them upright. */
+    autoRotate: boolean;
   };
   display: {
     fontSize: number;
@@ -55,7 +57,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  ocr: { engine: 'local', orientation: 'auto', detMaxSide: 1536, boxThresh: 0.5, unclipRatio: 1.5, cloudApiKey: '' },
+  ocr: { engine: 'local', orientation: 'auto', detMaxSide: 1536, boxThresh: 0.5, unclipRatio: 1.5, cloudApiKey: '', autoRotate: true },
   display: { fontSize: 22, vertical: false, highlightLowConfidence: true, hardLineBreaks: false, furigana: 'ruby' },
   dictionaries: [
     { name: BUILTIN_JMDICT, enabled: true },

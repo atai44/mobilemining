@@ -12,7 +12,9 @@ export interface LaidOutLine extends OcrLine { sep: Sep; block: number }
 
 interface Box { x0: number; y0: number; x1: number; y1: number }
 const boxOf = (l: OcrLine): Box => ({ x0: l.box.x, y0: l.box.y, x1: l.box.x + l.box.w, y1: l.box.y + l.box.h });
-const thick = (l: OcrLine) => Math.hypot(l.quad[3].x - l.quad[0].x, l.quad[3].y - l.quad[0].y);
+const boxThick = (l: OcrLine) => Math.hypot(l.quad[3].x - l.quad[0].x, l.quad[3].y - l.quad[0].y);
+/** True text thickness when detection measured it (boxes of curved lines are wider than the text). */
+const thick = (l: OcrLine) => (l.width && l.width > 0 ? Math.min(l.width, boxThick(l)) : boxThick(l));
 
 /** Overlap of [a0,a1] and [b0,b1] relative to the shorter one. */
 function overlapRatio(a0: number, a1: number, b0: number, b1: number): number {
@@ -32,6 +34,9 @@ function frame(l: OcrLine) {
 function continues(a: OcrLine, b: OcrLine): number | null {
   const fa = frame(a), fb = frame(b);
   if (overlapRatio(fa.across[0], fa.across[1], fb.across[0], fb.across[1]) < 0.6) return null;
+  // Pieces of one line follow each other; side-by-side lines (overlapping along the reading
+  // direction) are neighbours, even when slanted boxes overlap across.
+  if (overlapRatio(fa.along[0], fa.along[1], fb.along[0], fb.along[1]) > 0.3) return null;
   const t = Math.max(thick(a), thick(b));
   if (Math.min(thick(a), thick(b)) < t * 0.6) return null;
   const gap = Math.max(fb.along[0] - fa.along[1], fa.along[0] - fb.along[1]);
@@ -90,7 +95,11 @@ function blockRows(lines: OcrLine[], idx: number[]) {
   const across = (i: number) => (v ? [lines[i].box.x, lines[i].box.x + lines[i].box.w] : [lines[i].box.y, lines[i].box.y + lines[i].box.h]);
   for (const i of sorted) {
     const row = rows[rows.length - 1];
-    if (row && row.some((j) => { const a = across(j), b = across(i); return overlapRatio(a[0], a[1], b[0], b[1]) > 0.5; })) row.push(i);
+    const along = (k: number) => (v ? [lines[k].box.y, lines[k].box.y + lines[k].box.h] : [lines[k].box.x, lines[k].box.x + lines[k].box.w]);
+    if (row && row.some((j) => {
+      const a = across(j), b = across(i), la = along(j), lb = along(i);
+      return overlapRatio(a[0], a[1], b[0], b[1]) > 0.5 && overlapRatio(la[0], la[1], lb[0], lb[1]) < 0.3;
+    })) row.push(i);
     else rows.push([i]);
   }
   for (const row of rows) row.sort((a, b) => (v ? lines[a].box.y - lines[b].box.y : lines[a].box.x - lines[b].box.x));

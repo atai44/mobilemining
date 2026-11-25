@@ -1,12 +1,13 @@
 /// <reference lib="webworker" />
 import * as ort from 'onnxruntime-web/wasm';
-import { detectLines, recognizeLine, runOcr, type Tensor } from './pipeline';
+import { detectLines, pageOrientation, recognizeLine, runOcr, type Tensor } from './pipeline';
 import type { RGBAImage, WorkerRequest, WorkerResponse } from './types';
 
 declare const self: DedicatedWorkerGlobalScope;
 
 let det: ort.InferenceSession | null = null;
 let rec: ort.InferenceSession | null = null;
+let ori: ort.InferenceSession | null = null;
 let dict: string[] = [];
 let initPromise: Promise<void> | null = null;
 
@@ -35,14 +36,16 @@ async function fetchWithProgress(url: string, label: string): Promise<Uint8Array
 async function init(base: string) {
   ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
   ort.env.wasm.proxy = false;
-  const [detBuf, recBuf, dictJson] = await Promise.all([
+  const [detBuf, recBuf, oriBuf, dictJson] = await Promise.all([
     fetchWithProgress(base + 'models/det.onnx', 'detector'),
     fetchWithProgress(base + 'models/rec.onnx', 'recognizer'),
+    fetchWithProgress(base + 'models/ori.onnx', 'orientation').catch(() => null),
     fetch(base + 'models/rec_dict.json').then((r) => r.json() as Promise<string[]>),
   ]);
   const opts: ort.InferenceSession.SessionOptions = { executionProviders: ['wasm'], graphOptimizationLevel: 'all' };
   det = await ort.InferenceSession.create(detBuf, opts);
   rec = await ort.InferenceSession.create(recBuf, opts);
+  if (oriBuf) ori = await ort.InferenceSession.create(oriBuf, opts);
   dict = dictJson;
 }
 
@@ -91,11 +94,15 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
     if (msg.type === 'run') {
       const { lines, ms } = await serial(() => runOcr(msg.det, msg.src, msg.opts, runner(() => det!), runner(() => rec!), dict));
       post({ type: 'result', id: msg.id, lines, ms });
+    } else if (msg.type === 'orient') {
+      if (!ori) { post({ type: 'oriented', id: msg.id, rotate: 0, scores: [1, 0, 0, 0] }); return; }
+      const r = await serial(() => pageOrientation(msg.crops, runner(() => ori!)));
+      post({ type: 'oriented', id: msg.id, ...r });
     } else if (msg.type === 'detect') {
       const src = images.get(msg.imageId);
       if (!src) throw new Error('Image is no longer loaded');
       const geoms = await serial(() => detectLines(msg.det, src.width, src.height, msg.opts, runner(() => det!)));
-      post({ type: 'detected', id: msg.id, geoms: geoms.map((g) => ({ quad: g.quad, vertical: g.vertical, score: g.score })) });
+      post({ type: 'detected', id: msg.id, geoms: geoms.map((g) => ({ quad: g.quad, vertical: g.vertical, score: g.score, mid: g.mid, width: g.width })) });
     } else if (msg.type === 'rec') {
       const src = images.get(msg.imageId);
       if (!src) throw new Error('Image is no longer loaded');

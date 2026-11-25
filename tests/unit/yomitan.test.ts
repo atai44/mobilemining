@@ -202,3 +202,40 @@ describe('furigana detection', () => {
     expect(processFurigana([kanaLine, base], 'ruby')).toHaveLength(2);
   });
 });
+
+import { candidateReadings, snapReading, looseKana, checkFurigana } from '../../src/lib/rubyCheck';
+import { cleanRubyText } from '../../src/lib/ocr/ruby';
+describe('furigana dictionary check', () => {
+  const entries = [
+    { id: 1, k: [{ t: '一寸' }], r: [{ t: 'ちょっと' }, { t: 'いっすん' }], s: [] },
+    { id: 2, k: [{ t: '這入る' }], r: [{ t: 'はいる' }], s: [] },
+    { id: 3, k: [{ t: '罰する' }], r: [{ t: 'ばっする' }], s: [] },
+    { id: 4, k: [{ t: '罰' }], r: [{ t: 'ばつ' }], s: [] },
+    { id: 5, k: [{ t: '天明' }], r: [{ t: 'てんめい' }], s: [] },
+  ] as never[];
+  it('derives readings for the annotated characters', () => {
+    expect(candidateReadings('這入', entries)).toEqual(['はい']);
+    expect(candidateReadings('罰', entries).sort()).toEqual(['ばっ', 'ばつ']);
+  });
+  it('snaps OCR readings to dictionary readings', () => {
+    expect(snapReading('ちよつと', candidateReadings('一寸', entries))).toBe('ちょっと');
+    expect(snapReading('ぼっ', candidateReadings('罰', entries))).toBeNull(); // too short to guess
+    expect(snapReading('てんめ', candidateReadings('天明', entries))).toBe('てんめい');
+    expect(snapReading('かたおか', candidateReadings('天明', entries))).toBeNull();
+    expect(looseKana('ずいぶん')).toBe('すいふん');
+  });
+  it('splits furigana that covers two words', async () => {
+    const lookup = async (p: string) => (entries as { k: { t: string }[] }[]).filter((e) => e.k.some((k) => k.t.startsWith(p))) as never[];
+    expect(await checkFurigana('一寸這入', 'ちよつとはい', lookup)).toEqual({ parts: [{ from: 0, to: 2, text: 'ちょっと' }, { from: 2, to: 4, text: 'はい' }] });
+    expect(await checkFurigana('天明', 'てんめ', lookup)).toEqual({ parts: [{ from: 0, to: 2, text: 'てんめい' }] });
+  });
+  it('fixes a misread kanji using the furigana', async () => {
+    const all = [...(entries as never[]), { id: 9, k: [{ t: '説諭' }], r: [{ t: 'せつゆ' }], s: [] }];
+    const lookup = async (p: string) => (all as { k: { t: string }[] }[]).filter((e) => e.k.some((k) => k.t.startsWith(p))) as never[];
+    expect(await checkFurigana('説論', 'せつゆ', lookup, [[], ['諭', '輪']])).toEqual({ parts: [{ from: 0, to: 2, text: 'せつゆ' }], fix: { i: 1, c: '諭' } });
+  });
+  it('cleans furigana text', () => {
+    expect(cleanRubyText('ぶーてい')).toBe('ぶてい');
+    expect(cleanRubyText('ヴァイオリーン')).toBe('ヴァイオリーン');
+  });
+});

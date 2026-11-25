@@ -28,35 +28,54 @@ function findBase(lines: OcrLine[], ri: number): number {
   const r = lines[ri];
   if (r.chars.length > 40) return -1;
   const mostlyKana = kanaRatio(r) >= 0.75;
-  const tr = thickness(r);
+  const rWidth = textWidth(r);
   const rLen = dist(r.quad[0], r.quad[1]);
-  const rubySize = Math.min(tr, rLen / Math.max(1, r.chars.length));
+  const rubySize = Math.min(rWidth, rLen / Math.max(1, r.chars.length));
   const rc = centre(r);
   // Ruby extent along its own axis (used to require overlap with the base)
   const rEnds = [mix(r.quad[0], r.quad[3], 0.5), mix(r.quad[1], r.quad[2], 0.5)];
   let best = -1, bestScore = Infinity;
   lines.forEach((b, bi) => {
     if (bi === ri || b.vertical !== r.vertical || !b.chars.length) return;
-    const tb = thickness(b);
-    if (tr > tb * 0.95 || rubySize > tb * 0.72) return;
+    const tb = textWidth(b);
+    if (rubySize > tb * 0.72 || rWidth > tb * 0.95) return;
     // A tiny 1–3 character "line" right where furigana goes is furigana even if OCR misread it as kanji.
     if (!mostlyKana && !(r.chars.length <= 3 && rubySize <= tb * 0.6)) return;
     const L = Math.max(dist(b.quad[0], b.quad[1]), 1);
+    const qt = thickness(b);
     const axis = { x: (b.quad[1].x - b.quad[0].x) / L, y: (b.quad[1].y - b.quad[0].y) / L };
-    const nrm = { x: (b.quad[3].x - b.quad[0].x) / tb, y: (b.quad[3].y - b.quad[0].y) / tb };
+    const nrm = { x: (b.quad[3].x - b.quad[0].x) / qt, y: (b.quad[3].y - b.quad[0].y) / qt };
     const m0 = mix(b.quad[0], b.quad[3], 0.5);
     const along = (p: Point) => ((p.x - m0.x) * axis.x + (p.y - m0.y) * axis.y) / L;
     // overlap along the base
     const [s0, s1] = rEnds.map(along).sort((x, y) => x - y);
     const ov = Math.min(s1, 1) - Math.max(s0, 0);
     if (ov < (s1 - s0) * 0.5 - 0.02) return;
-    // perpendicular offset of the ruby centre from the base centre line
-    const o = (rc.x - m0.x) * nrm.x + (rc.y - m0.y) * nrm.y;
-    const expected = -(tb + tr) / 2;
-    if (o > -tb * 0.2 || o < expected - tb * 0.45) return;
+    // Perpendicular offset of the ruby centre from the base's *local* centre line, which
+    // follows curved and slanted lines in photos (a straight box drifts off the text).
+    const c = closestOnPolyline(rc, b.mid && b.mid.length >= 2 ? b.mid : [mix(b.quad[0], b.quad[3], 0.5), mix(b.quad[1], b.quad[2], 0.5)]);
+    const o = (rc.x - c.x) * nrm.x + (rc.y - c.y) * nrm.y;
+    const expected = -(tb + rWidth) / 2;
+    if (o > -tb * 0.25 || o < expected - tb * 0.6) return;
     const score = Math.abs(o - expected);
     if (score < bestScore) { bestScore = score; best = bi; }
   });
+  return best;
+}
+
+/** True text thickness: from detection when available, else the box thickness. */
+const textWidth = (l: OcrLine) => (l.width && l.width > 0 ? Math.min(l.width, thickness(l)) : thickness(l));
+
+function closestOnPolyline(p: Point, pts: Point[]): Point {
+  let best = pts[0], bestD = Infinity;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / Math.max(1e-9, dx * dx + dy * dy)));
+    const q = { x: a.x + t * dx, y: a.y + t * dy };
+    const d = Math.hypot(p.x - q.x, p.y - q.y);
+    if (d < bestD) { bestD = d; best = q; }
+  }
   return best;
 }
 
@@ -108,8 +127,8 @@ export function attachRuby(base: OcrLine, ruby: OcrLine): Ruby[] {
       // contiguous kanji run around the kanji closest to the cluster centre
       const seed = kanji.reduce((a, b) => (Math.abs(b.u - centre) < Math.abs(a.u - centre) ? b : a)).i;
       from = seed; to = seed + 1;
-      while (from > 0 && isKanji(base.chars[from - 1].c) && basePos[from - 1] >= cl.s0 - pitch * 0.75) from--;
-      while (to < base.chars.length && isKanji(base.chars[to].c) && basePos[to] <= cl.s1 + pitch * 0.75) to++;
+      while (from > 0 && isKanji(base.chars[from - 1].c) && basePos[from - 1] >= cl.s0 - pitch * 0.6) from--;
+      while (to < base.chars.length && isKanji(base.chars[to].c) && basePos[to] <= cl.s1 + pitch * 0.6) to++;
     } else {
       from = near[0].i; to = near[near.length - 1].i + 1;
     }
@@ -121,16 +140,23 @@ export function attachRuby(base: OcrLine, ruby: OcrLine): Ruby[] {
   return mergeAdjacent(out).map((r) => ({ ...r, text: cleanRubyText(r.text) })).filter((r) => r.text);
 }
 
-/** Furigana spread one kana per kanji (薔[ば]薇[ら]) belongs to one word: group adjacent runs. */
+/**
+ * Furigana spread one or two kana per kanji (薔[ば]薇[ら], 随[ずい]分[ぶん]) belongs to one word:
+ * group adjacent runs. Longer readings (一寸[ちょっと]這入[はい]) are separate words.
+ */
 function mergeAdjacent(rubies: Ruby[]): Ruby[] {
-  const merged: Ruby[] = [];
+  const merged: (Ruby & { parts: number })[] = [];
   for (const r of [...rubies].sort((a, b) => a.from - b.from)) {
     const last = merged[merged.length - 1];
     if (last && r.from < last.to) continue; // overlapping: keep the first
-    if (last && last.to === r.from) { last.to = r.to; last.text += r.text; }
-    else merged.push({ ...r });
+    const short = (x: Ruby) => Array.from(x.text).length <= 2 * (x.to - x.from);
+    if (last && last.to === r.from && short(r) && Array.from(last.text).length <= 2 * last.parts && last.to - last.from === last.parts && r.to - r.from === 1) {
+      last.to = r.to; last.text += r.text; last.parts++;
+      continue;
+    }
+    merged.push({ ...r, parts: r.to - r.from });
   }
-  return merged;
+  return merged.map(({ parts: _p, ...r }) => r);
 }
 
 const SMALL_VOWELS: Record<string, string> = { ぁ: 'あ', ぃ: 'い', ぅ: 'う', ぇ: 'え', ぉ: 'お' };
@@ -140,7 +166,10 @@ const SMALL_VOWELS: Record<string, string> = { ぁ: 'あ', ぃ: 'い', ぅ: 'う
  * (which essentially never occur in furigana) into full-size ones: きのぅ -> きのう.
  */
 export function cleanRubyText(t: string): string {
-  return Array.from(t).filter((c) => isKana(c)).map((c) => SMALL_VOWELS[c] ?? c).join('');
+  const cs = Array.from(t).filter((c) => isKana(c));
+  const katakana = cs.filter((c) => /\p{Script=Katakana}/u.test(c)).length > cs.length / 2;
+  // ー only belongs in katakana readings; in hiragana furigana it's OCR noise.
+  return cs.filter((c) => katakana || c !== 'ー').map((c) => (katakana ? c : SMALL_VOWELS[c] ?? c)).join('');
 }
 
 /** Removes furigana lines from `lines`, attaching them as ruby when mode is 'ruby'. */
