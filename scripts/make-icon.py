@@ -16,6 +16,9 @@ HAND_EDGE = (150, 140, 124)
 WOOD, WOOD2, IRON, IRON2 = (150, 98, 56), (112, 70, 38), (196, 202, 210), (120, 126, 134)
 
 
+DROP = 4
+
+
 def base():
     """A 32×32 monkey in profile: white fur, brown face mask, a miner's helmet, pickaxe over the shoulder."""
     px = {}
@@ -54,9 +57,6 @@ def base():
     # the handle, over the shoulder, through the hand and a little beyond
     for i in range(0, 13):
         dot(10 + i, 18 + i, WOOD); dot(10 + i, 19 + i, WOOD2)
-    for (x, y) in [(19, 26), (20, 26), (18, 27), (19, 27), (20, 27), (21, 27), (19, 28), (20, 28), (21, 28)]:   # the hand, brown
-        dot(x, y, MASK)
-    dot(18, 26, EAR); dot(21, 26, EAR); dot(18, 28, EAR)
     # ear
     for y in (14, 15, 16, 17):
         row(y, 11, 13, EAR)
@@ -81,8 +81,9 @@ def base():
 
     im = Image.new('RGB', (32, 32), BG)
     for (x, y), c in px.items():
-        if 0 <= x < 32 and 0 <= y < 32:
-            im.putpixel((31 - x, y), c)   # mirrored: he faces left
+        yy = y + DROP   # framed from the chest up: the handle and the tail run off the bottom
+        if 0 <= x < 32 and 0 <= yy < 32:
+            im.putpixel((31 - x, yy), c)   # mirrored: he faces left
     return im
 
 
