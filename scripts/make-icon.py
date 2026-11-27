@@ -63,18 +63,25 @@ def base(style=1):
     dot(25, 16, BLACK)
     # The pickaxe, in front of him, placed pixel by pixel.
     # Handle: two pixels wide on every row, from just beyond the head down off the frame.
-    for y in range(11, 32):
+    for y in range(12, 32):
         dot(y - 10, y, WOOD); dot(y - 9, y, WOOD2)
-    # Head: two straight arms at right angles, the same on both sides of the handle, each
-    # two pixels thick and ending in a one-pixel point.
-    metal = [(x, 13, 0) for x in range(3, 13)] + [(x, 14, 1) for x in range(4, 11)] \
-        + [(3, y, 0) for y in range(13, 23)] + [(4, y, 1) for y in range(14, 21)]
-    for (x, y, tone) in metal:
-        dot(x, y, METAL[tone])
+    # Head: a quarter of a ring centred on the handle, so both sides match. Two pixels thick
+    # over the handle, thinning to a one-pixel point at each end.
+    import math
+    CX, CY, R = 12, 22, 9.4
+    metal = set()
+    for x in range(1, CX + 1):
+        for y in range(11, CY + 1):
+            d = math.hypot(x - CX, y - CY)
+            f = math.atan2(CY - y, CX - x) / (math.pi / 2)
+            if R - (0.8 + 1.5 * math.sin(math.pi * f)) < d <= R:
+                metal.add((x, y))
+    near = lambda x, y: [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
+    for (x, y) in metal:
+        outer = any(q not in metal and math.hypot(q[0] - CX, q[1] - CY) > R for q in near(x, y))
+        dot(x, y, METAL[0 if outer else 1])
     # Edge: near-black against the background, dark grey where it crosses the fur.
-    edge = [(x, 12) for x in range(4, 13)] + [(13, 13), (11, 14), (12, 14)] + [(x, 15) for x in range(7, 11)] \
-        + [(2, y) for y in range(13, 23)] + [(3, 23), (4, 21), (4, 22)] + [(5, y) for y in range(16, 21)]
-    for (x, y) in edge:
+    for (x, y) in {q for m in metal for q in near(*m)} - metal:
         if px.get((x, y)) not in (WOOD, WOOD2):
             dot(x, y, SOFT_EDGE if (x, y) in px else OUTLINE)
     # helmet, fitting the head, level, with the lamp at the front
