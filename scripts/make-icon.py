@@ -18,6 +18,7 @@ WOOD, WOOD2, IRON, IRON2 = (150, 98, 56), (112, 70, 38), (196, 202, 210), (120, 
 
 N, TOP = 28, 2
 OUTLINE = (16, 24, 36)
+SOFT_EDGE = (176, 178, 180)
 METAL = ((255, 255, 255), (200, 206, 214), (92, 98, 108))   # highlight, mid, shadow
 
 
@@ -50,6 +51,9 @@ def base(style=1):
     for (x, y) in [(11, 20), (12, 20), (10, 19)]:
         dot(x, y, SHADE)
     # pickaxe head: a crescent across the end of the handle (in front of the head)
+    # the top of the handle: under the metal, with its end poking out on the far side of the head
+    for i in range(-2, 5):
+        dot(5 + i, 13 + i, WOOD); dot(5 + i, 14 + i, WOOD2)
     # a quarter-round head: one tip points along the top, the other straight down
     arc = [(2, 21), (2, 20), (2, 19), (2, 18), (2, 17), (3, 16), (3, 15), (4, 14), (5, 13), (6, 12), (7, 12), (8, 12), (9, 12), (10, 12), (11, 12)]
     if style >= 2:   # a longer, heavier head
@@ -61,8 +65,6 @@ def base(style=1):
             dot(xx, yy, c); iron.add((xx, yy))
     if style == 0:
         dot(1, 20, METAL[2]); dot(10, 10, METAL[2])
-    for i in range(0, 5):   # the top of the handle
-        dot(5 + i, 13 + i, WOOD); dot(5 + i, 14 + i, WOOD2)
     # the handle, over the shoulder, through the hand and a little beyond
     for i in range(0, 13):
         dot(10 + i, 18 + i, WOOD); dot(10 + i, 19 + i, WOOD2)
@@ -92,8 +94,10 @@ def base(style=1):
         for (x, y) in list(iron):
             for (xx, yy) in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
                 # all the way round, also where it crosses the fur (but not over the helmet or handle)
-                if (xx, yy) not in iron and px.get((xx, yy)) not in (HAT, HAT_EDGE, BRIM, WOOD, WOOD2, LAMP, LAMP_RIM):
-                    px[(xx, yy)] = OUTLINE
+                # dark against the background; only a soft grey line where it crosses the fur
+                if (xx, yy) in iron or px.get((xx, yy)) in (HAT, HAT_EDGE, BRIM, WOOD, WOOD2, LAMP, LAMP_RIM, OUTLINE):
+                    continue
+                px[(xx, yy)] = OUTLINE if (xx, yy) not in px else SOFT_EDGE
     # Framed tightly from the chest up, facing left: N×N pixels of the 32-wide drawing.
     im = Image.new('RGB', (N, N), BG)
     for (x, y), c in px.items():
