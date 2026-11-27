@@ -18,6 +18,7 @@ WOOD, WOOD2, IRON, IRON2 = (150, 98, 56), (112, 70, 38), (196, 202, 210), (120, 
 
 N, TOP = 28, 2
 OUTLINE = (22, 44, 72)
+METAL = ((196, 202, 210), (196, 202, 210), (120, 126, 134))   # highlight, mid, shadow
 
 
 def base(style=1):
@@ -54,10 +55,11 @@ def base(style=1):
         arc = [(0, 22), (0, 21), (0, 20)] + arc + [(10, 9), (11, 9)]
     iron = set()
     for (x, y) in arc:
-        for (xx, yy, c) in [(x, y, IRON), (x + 1, y, IRON), (x + 1, y + 1, IRON2)] + ([(x + 2, y + 1, IRON2), (x, y - 1, WHITE)] if style >= 2 else []):
+        # three tones across the blade: highlight on the outer edge, mid, shadow on the inner edge
+        for (xx, yy, c) in [(x, y, METAL[0]), (x + 1, y, METAL[1]), (x + 1, y + 1, METAL[2])] + ([(x + 2, y + 1, METAL[2]), (x, y - 1, METAL[0])] if style >= 2 else []):
             dot(xx, yy, c); iron.add((xx, yy))
     if style == 0:
-        dot(1, 20, IRON2); dot(10, 10, IRON2)
+        dot(1, 20, METAL[2]); dot(10, 10, METAL[2])
     for i in range(0, 5):   # the top of the handle
         dot(5 + i, 13 + i, WOOD); dot(5 + i, 14 + i, WOOD2)
     # the handle, over the shoulder, through the hand and a little beyond
