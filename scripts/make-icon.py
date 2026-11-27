@@ -16,10 +16,11 @@ HAND_EDGE = (150, 140, 124)
 WOOD, WOOD2, IRON, IRON2 = (150, 98, 56), (112, 70, 38), (196, 202, 210), (120, 126, 134)
 
 
-DROP = 4
+N, TOP = 28, 2
+OUTLINE = (22, 44, 72)
 
 
-def base():
+def base(style=1):
     """A 32×32 monkey in profile: white fur, brown face mask, a miner's helmet, pickaxe over the shoulder."""
     px = {}
 
@@ -32,11 +33,10 @@ def base():
 
     # (drawn facing right, mirrored at the end)
     # tail: a solid curl, two pixels thick (no diagonal-only joins)
-    tail = [(x, y) for y in (29, 30) for x in range(3, 9)] + [(x, y) for x in (2, 3) for y in range(23, 30)] \
-        + [(x, y) for y in (22, 23) for x in range(3, 7)] + [(x, y) for x in (5, 6) for y in (24, 25)]
+    tail = [(x, y) for x in (2, 3) for y in range(23, 32)] + [(x, y) for y in (22, 23) for x in range(3, 7)] + [(x, y) for x in (5, 6) for y in (24, 25)]
     for (x, y) in tail:
         dot(x, y, FUR)
-    for (x, y) in [(x, 30) for x in range(3, 9)] + [(2, y) for y in range(23, 30)] + [(6, 25), (5, 25)]:
+    for (x, y) in [(2, y) for y in range(23, 32)] + [(6, 25), (5, 25)]:
         dot(x, y, SHADE)
     # body, sitting
     for y, (a, b) in {21: (11, 19), 22: (10, 20), 23: (9, 21), 24: (9, 21), 25: (8, 21), 26: (8, 21), 27: (8, 21), 28: (8, 22), 29: (8, 23), 30: (8, 24), 31: (8, 24)}.items():
@@ -49,9 +49,15 @@ def base():
     for (x, y) in [(11, 20), (12, 20), (10, 19)]:
         dot(x, y, SHADE)
     # pickaxe head: a crescent across the end of the handle (in front of the head)
-    for (x, y) in [(1, 19), (1, 18), (2, 17), (2, 16), (3, 15), (3, 14), (4, 13), (5, 12), (6, 11), (7, 11), (8, 10), (9, 10)]:
-        dot(x, y, IRON); dot(x + 1, y, IRON); dot(x + 1, y + 1, IRON2)
-    dot(1, 20, IRON2); dot(10, 10, IRON2)
+    arc = [(1, 19), (1, 18), (2, 17), (2, 16), (3, 15), (3, 14), (4, 13), (5, 12), (6, 11), (7, 11), (8, 10), (9, 10)]
+    if style >= 2:   # a longer, heavier head
+        arc = [(0, 22), (0, 21), (0, 20)] + arc + [(10, 9), (11, 9)]
+    iron = set()
+    for (x, y) in arc:
+        for (xx, yy, c) in [(x, y, IRON), (x + 1, y, IRON), (x + 1, y + 1, IRON2)] + ([(x + 2, y + 1, IRON2), (x, y - 1, WHITE)] if style >= 2 else []):
+            dot(xx, yy, c); iron.add((xx, yy))
+    if style == 0:
+        dot(1, 20, IRON2); dot(10, 10, IRON2)
     for i in range(0, 5):   # the top of the handle
         dot(5 + i, 13 + i, WOOD); dot(5 + i, 14 + i, WOOD2)
     # the handle, over the shoulder, through the hand and a little beyond
@@ -79,17 +85,30 @@ def base():
     for y in (6, 7):
         row(y, 23, 25, LAMP)
 
-    im = Image.new('RGB', (32, 32), BG)
+    if style >= 1:   # a dark edge where the pick head meets the background
+        for (x, y) in list(iron):
+            for (xx, yy) in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if (xx, yy) not in px:
+                    px[(xx, yy)] = OUTLINE
+    # Framed tightly from the chest up, facing left: N×N pixels of the 32-wide drawing.
+    im = Image.new('RGB', (N, N), BG)
     for (x, y), c in px.items():
-        yy = y + DROP   # framed from the chest up: the handle and the tail run off the bottom
-        if 0 <= x < 32 and 0 <= yy < 32:
-            im.putpixel((31 - x, yy), c)   # mirrored: he faces left
+        xx, yy = N - 1 - x, y - TOP
+        if 0 <= xx < N and 0 <= yy < N:
+            im.putpixel((xx, yy), c)
     return im
 
 
 root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
-icon = base()
-up = lambda size: icon.resize((size, size), Image.NEAREST)
+import sys
+icon = base(int(sys.argv[1]) if len(sys.argv) > 1 else 1)
+def up(size):
+    """The icon at `size` px: whole-number pixel scaling, centred on the background colour."""
+    k = max(1, size // icon.width)
+    out = Image.new('RGB', (size, size), BG)
+    out.paste(icon.resize((icon.width * k, icon.width * k), Image.NEAREST), ((size - icon.width * k) // 2,) * 2)
+    return out
+
 bg = BG
 
 # Web
