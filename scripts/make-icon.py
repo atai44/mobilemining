@@ -68,12 +68,12 @@ def base(style=1):
     # Head: a quarter turn with a cut corner, the same on both sides of the handle. Two pixels
     # thick (three across the corner), thinning to a one-pixel point at each end.
     metal = [(x, 13, 0) for x in range(6, 13)] + [(5, 14, 0), (4, 15, 0)] + [(3, y, 0) for y in range(16, 23)] \
-        + [(x, 14, 1) for x in range(6, 11)] + [(5, 15, 1), (6, 15, 1), (5, 16, 1)] + [(4, y, 1) for y in range(16, 21)]
+        + [(x, 14, 1) for x in range(6, 10)] + [(5, 15, 1), (6, 15, 1), (5, 16, 1)] + [(4, y, 1) for y in range(16, 20)]
     for (x, y, tone) in metal:
         dot(x, y, METAL[tone])
     # Edge: near-black against the background, dark grey where it crosses the fur.
-    edge = [(x, 12) for x in range(6, 13)] + [(13, 13), (11, 14), (12, 14)] + [(x, 15) for x in range(7, 11)] \
-        + [(5, 13), (3, 15)] + [(2, y) for y in range(16, 23)] + [(3, 23), (4, 21), (4, 22)] + [(5, y) for y in range(17, 21)]
+    edge = [(x, 12) for x in range(6, 13)] + [(13, 13), (10, 14), (11, 14), (12, 14)] + [(x, 15) for x in range(7, 10)] \
+        + [(5, 13), (3, 15)] + [(2, y) for y in range(16, 23)] + [(3, 23), (4, 20), (4, 21), (4, 22)] + [(5, y) for y in range(17, 20)]
     for (x, y) in edge:
         if px.get((x, y)) not in (WOOD, WOOD2):
             dot(x, y, SOFT_EDGE if (x, y) in px else OUTLINE)
