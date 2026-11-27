@@ -445,11 +445,11 @@ progress { height: 6px; }
 .lookup-panel .page { padding-bottom: 10px; }
 .lookup-panel .scan { padding-bottom: 0; }
 .lookup-panel .text-panel .toolbar { display: none; }
-/* A longer selection: its text takes only the room it needs (a third of the panel at most, then
-   it scrolls), at the ordinary text size; the dictionary gets the rest */
-.lookup-panel .scan-main { flex: 0 1 auto; max-height: 33%; }
+/* A longer selection: its text takes only the room it needs (40% of the panel at most, then
+   it scrolls), at the Read tab's text size so words stay easy to tap; the dictionary gets the rest */
+.lookup-panel .scan-main { flex: 0 1 auto; max-height: 40%; }
 .lookup-panel .text-panel { flex: 0 1 auto; }
-.lookup-panel .reader { font-size: 1rem !important; line-height: 1.6; padding: 8px 12px; }
+.lookup-panel .reader { line-height: 1.7; padding: 8px 12px; }
 .lookup-panel .dict-panel { flex: 1; }
 .lookup-panel .panel-grip { display: none; }
 /* A single selected word: nothing but its dictionary entry */
