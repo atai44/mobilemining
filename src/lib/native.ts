@@ -163,12 +163,14 @@ export async function saveFile(blob: Blob, name: string): Promise<void> {
 
 /** Text on the clipboard ('' when empty or not allowed). Call from a tap: browsers require it. */
 export async function readClipboardText(): Promise<string> {
-  try {
-    if (isNative()) {
+  if (isNative()) {
+    try {
       const { Clipboard } = await import('@capacitor/clipboard');
       const r = await Clipboard.read();
-      return r.type.startsWith('text') ? r.value : '';
-    }
+      if (r.value) return r.type.startsWith('text') ? r.value : '';
+    } catch { /* fall back to the browser's clipboard */ }
+  }
+  try {
     return (await navigator.clipboard?.readText?.()) ?? '';
   } catch {
     return '';

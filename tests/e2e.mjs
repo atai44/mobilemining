@@ -776,6 +776,7 @@ await shot('09-mined');
         updateNote: () => ({}),
         open: () => ({}),
       },
+      Clipboard: { read: async () => ({ type: 'text/plain', value: await navigator.clipboard.readText() }) },
       // 読む has a recording; everything else gets the "not available" clip (52,288 bytes)
       CapacitorHttp: {
         get: ({ url }) => ({ status: 200, headers: {}, data: btoa('x'.repeat(decodeURIComponent(url).includes('読む') ? 3000 : 52288)) }),
