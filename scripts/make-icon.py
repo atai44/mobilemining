@@ -28,10 +28,12 @@ def base():
         px[(x, y)] = c
 
     # (drawn facing right, mirrored at the end)
-    # tail
-    for (x, y) in [(9, 30), (8, 30), (7, 30), (6, 29), (5, 28), (4, 27), (4, 26), (4, 25), (5, 24), (6, 24), (7, 25), (7, 26), (6, 27)]:
+    # tail: a solid curl, two pixels thick (no diagonal-only joins)
+    tail = [(x, y) for y in (29, 30) for x in range(3, 9)] + [(x, y) for x in (2, 3) for y in range(23, 30)] \
+        + [(x, y) for y in (22, 23) for x in range(3, 7)] + [(x, y) for x in (5, 6) for y in (24, 25)]
+    for (x, y) in tail:
         dot(x, y, FUR)
-    for (x, y) in [(8, 31), (7, 31), (6, 30), (5, 29), (4, 28), (3, 27), (3, 26), (3, 25), (4, 24), (5, 23), (6, 23)]:
+    for (x, y) in [(x, 30) for x in range(3, 9)] + [(2, y) for y in range(23, 30)] + [(6, 25), (5, 25)]:
         dot(x, y, SHADE)
     # body, sitting
     for y, (a, b) in {21: (11, 19), 22: (10, 20), 23: (9, 21), 24: (9, 21), 25: (8, 21), 26: (8, 21), 27: (8, 21), 28: (8, 22), 29: (8, 23), 30: (8, 24), 31: (8, 24)}.items():
@@ -52,18 +54,9 @@ def base():
     # the handle, over the shoulder, through the hand and a little beyond
     for i in range(0, 13):
         dot(10 + i, 18 + i, WOOD); dot(10 + i, 19 + i, WOOD2)
-    # the arm reaching forward and the hand gripping the handle, outlined so they read
-    for x in range(13, 19):   # the forearm, coming across below the handle
-        dot(x, 28, FUR); dot(x, 29, FUR)
-    for x in range(13, 18):
-        dot(x, 27, SHADE)
-    for x in range(13, 19):
-        dot(x, 30, SHADE)
-    dot(12, 28, SHADE); dot(12, 29, SHADE)
-    for (x, y) in [(19, 26), (20, 26), (18, 27), (19, 27), (20, 27), (21, 27), (19, 28), (20, 28), (21, 28)]:
-        dot(x, y, FUR)
-    for (x, y) in [(19, 25), (20, 25), (21, 26), (22, 27), (22, 28), (21, 29), (20, 29), (19, 29), (18, 28)]:
-        dot(x, y, HAND_EDGE)
+    for (x, y) in [(19, 26), (20, 26), (18, 27), (19, 27), (20, 27), (21, 27), (19, 28), (20, 28), (21, 28)]:   # the hand, brown
+        dot(x, y, MASK)
+    dot(18, 26, EAR); dot(21, 26, EAR); dot(18, 28, EAR)
     # ear
     for y in (14, 15, 16, 17):
         row(y, 11, 13, EAR)
