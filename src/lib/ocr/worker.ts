@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import * as ort from 'onnxruntime-web/wasm';
-import { detectLines, pageOrientation, recognizeLine, runOcr, type Tensor } from './pipeline';
+import { detectLines, pageOrientation, readHandwriting, recognizeLine, runOcr, type Tensor } from './pipeline';
 import type { RGBAImage, WorkerRequest, WorkerResponse } from './types';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -98,6 +98,9 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       if (!ori) { post({ type: 'oriented', id: msg.id, rotate: 0, scores: [1, 0, 0, 0] }); return; }
       const r = await serial(() => pageOrientation(msg.crops, runner(() => ori!)));
       post({ type: 'oriented', id: msg.id, ...r });
+    } else if (msg.type === 'write') {
+      const chars = await serial(() => readHandwriting(msg.src, runner(() => rec!), dict));
+      post({ type: 'written', id: msg.id, chars });
     } else if (msg.type === 'detect') {
       const src = images.get(msg.imageId);
       if (!src) throw new Error('Image is no longer loaded');

@@ -160,3 +160,30 @@ export async function saveFile(blob: Blob, name: string): Promise<void> {
     if (!/cancel/i.test(String((e as Error)?.message ?? e))) throw e;
   }
 }
+
+/** Text on the clipboard ('' when empty or not allowed). Call from a tap: browsers require it. */
+export async function readClipboardText(): Promise<string> {
+  try {
+    if (isNative()) {
+      const { Clipboard } = await import('@capacitor/clipboard');
+      const r = await Clipboard.read();
+      return r.type.startsWith('text') ? r.value : '';
+    }
+    return (await navigator.clipboard?.readText?.()) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+interface LookupPlugin {
+  pending(): Promise<{ text: string; popup: boolean }>;
+  close(): Promise<void>;
+}
+const Lookup = registerPlugin<LookupPlugin>('Lookup');
+
+/** Text this window was opened for (Android: selected or shared text), and whether it is the lookup panel. */
+export async function pendingLookup(): Promise<{ text: string; popup: boolean }> {
+  if (!isNative()) return { text: '', popup: false };
+  try { return await Lookup.pending(); } catch { return { text: '', popup: false }; }
+}
+export const closeLookupPanel = () => Lookup.close().catch(() => {});

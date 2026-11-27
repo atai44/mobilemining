@@ -1,5 +1,5 @@
 import { localEngine, recognize, type Rect } from './lib/ocr/client';
-import { charCells, opening, scan, settings, view, ocrState, showToast, textFromLines, trimLine, type Scan } from './store';
+import { autoLookup, charCells, opening, scan, settings, view, ocrState, showToast, textFromLines, trimLine, type Scan } from './store';
 import type { OcrLine, Orientation, Point } from './lib/ocr/types';
 import { processFurigana } from './lib/ocr/ruby';
 import { arrange, type LaidOutLine } from './lib/ocr/layout';
@@ -331,6 +331,7 @@ export function openText(text: string, source = '') {
   page = freshPage();
   const cps = Array.from(text.normalize('NFC'));
   scan.value = { canvas: null, url: null, lines: [], text: cps, meta: cps.map(() => null), lineOf: cps.map(() => -1), ruby: [], geom: cps.map(() => null), pending: [], progress: null, sectionsEdited: false, areas: [], busy: false, error: null, source };
+  autoLookup.value = true;
   view.value = 'scan';
 }
 

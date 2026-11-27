@@ -59,7 +59,9 @@ export type WorkerRequest =
   | { type: 'image'; id: number; imageId: number; src: RGBAImage }
   | { type: 'detect'; id: number; imageId: number; det: RGBAImage; opts: OcrOptions }
   | { type: 'rec'; id: number; imageId: number; geoms: LineGeomMsg[] }
-  | { type: 'orient'; id: number; crops: RGBAImage[] };
+  | { type: 'orient'; id: number; crops: RGBAImage[] }
+  /** One hand-drawn character. */
+  | { type: 'write'; id: number; src: RGBAImage };
 
 export type WorkerResponse =
   | { type: 'progress'; file: string; loaded: number; total: number }
@@ -69,4 +71,5 @@ export type WorkerResponse =
   | { type: 'ok'; id: number }
   | { type: 'detected'; id: number; geoms: LineGeomMsg[] }
   | { type: 'recognized'; id: number; lines: (OcrLine | null)[] }
-  | { type: 'oriented'; id: number; rotate: number; scores: number[] };
+  | { type: 'oriented'; id: number; rotate: number; scores: number[] }
+  | { type: 'written'; id: number; chars: { c: string; p: number }[] };

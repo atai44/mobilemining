@@ -64,6 +64,7 @@ export function SettingsView() {
         </label>
         <Toggle label="縦書き text" checked={st.display.vertical} onChange={(v) => updateSettings((s) => (s.display.vertical = v))} />
         <Toggle label="Underline unsure characters" checked={st.display.highlightLowConfidence} onChange={(v) => updateSettings((s) => (s.display.highlightLowConfidence = v))} />
+        <Toggle label="Text button opens the clipboard" checked={st.display.autoPaste} onChange={(v) => updateSettings((s) => (s.display.autoPaste = v))} testid="auto-paste" />
         <Toggle label="Line break ends sentence" checked={st.display.hardLineBreaks} onChange={(v) => updateSettings((s) => (s.display.hardLineBreaks = v))} />
         <label class="field">
           <span>Furigana</span>

@@ -44,6 +44,10 @@ export const opening = signal<string | null>(null);
 /** Dictionary install / import progress. Kept here so it survives leaving the Settings tab. */
 export const dictProgress = signal<{ stage: string; done: number; total: number } | null>(null);
 export const dictErrors = signal<string[]>([]);
+/** Look up the first word of the text that was just opened (pasted or shared text). */
+export const autoLookup = signal(false);
+/** Running as the lookup panel over another app (Android text-selection menu). */
+export const lookupPanel = signal(false);
 export const toast = signal<{ text: string; kind: 'ok' | 'error' | 'info' } | null>(null);
 export const ocrState = signal<{ state: 'idle' | 'loading' | 'ready' | 'error'; loaded?: number; total?: number; message?: string }>({ state: 'idle' });
 

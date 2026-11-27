@@ -499,6 +499,26 @@ async function readQuad(src: RGBAImage, quad: [Point, Point, Point, Point], vert
   return { chars, conf };
 }
 
+/**
+ * Reads one hand-drawn character: the whole image goes through the recognizer, and the most
+ * likely characters anywhere in its output are returned, best first.
+ */
+export async function readHandwriting(src: RGBAImage, runRec: RunModel, dict: string[], count = 12): Promise<{ c: string; p: number }[]> {
+  const w = src.width, h = src.height;
+  const out = await runRec(recTensor(src, [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }]));
+  const T = out.dims[1], C = out.dims[2];
+  const data = out.data as Float32Array;
+  const best = new Float32Array(C);
+  for (let t = 0; t < T; t++) for (let c = 1; c < C; c++) { const p = data[t * C + c]; if (p > best[c]) best[c] = p; }
+  const top: { c: string; p: number }[] = [];
+  for (let c = 1; c < C; c++) {
+    const ch = dict[c];
+    if (best[c] < 1e-4 || !ch || !ch.trim()) continue;
+    top.push({ c: ch, p: best[c] });
+  }
+  return top.sort((a, b) => b.p - a.p).slice(0, count);
+}
+
 type Quad = [Point, Point, Point, Point];
 // Reading-frame rotations of a line quad [start-top, end-top, end-bottom, start-bottom]
 const rot180 = (q: Quad): Quad => [q[2], q[3], q[0], q[1]];

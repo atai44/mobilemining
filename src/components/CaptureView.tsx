@@ -3,7 +3,7 @@ import { dictProgress, dicts, ocrState, refreshDicts, scan, settings, showToast,
 import { installDictionaries } from '../lib/db';
 import { ensureOcrEngine, openImage, openPdfFile, openText } from '../scanActions';
 import { isAndroid } from '../lib/anki';
-import { isNative } from '../lib/native';
+import { isNative, readClipboardText } from '../lib/native';
 
 const BASE = new URL(import.meta.env.BASE_URL, location.href).href;
 
@@ -24,6 +24,15 @@ export function CaptureView() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [pasting, setPasting] = useState(false);
   const [pasteText, setPasteText] = useState('');
+
+  // Text: what's on the clipboard is opened straight away (and its first word looked up);
+  // with nothing there, or with the setting off, the box to type or paste into is shown.
+  const openTextInput = async () => {
+    if (pasting) { setPasting(false); return; }
+    const clip = settings.value.display.autoPaste ? (await readClipboardText()).trim() : '';
+    if (clip) openText(clip, '');
+    else setPasting(true);
+  };
 
   const onFile = async (e: Event) => {
     const input = e.currentTarget as HTMLInputElement;
@@ -74,7 +83,7 @@ export function CaptureView() {
         <button class="big-button" onClick={() => fileRef.current?.click()}>
           <span class="big-icon">🖼</span>Image / PDF
         </button>
-        <button class="big-button" onClick={() => setPasting(!pasting)}>
+        <button class="big-button" onClick={openTextInput} data-testid="text-button">
           <span class="big-icon">⌨</span>Text
         </button>
       </div>
@@ -90,7 +99,7 @@ export function CaptureView() {
             value={pasteText}
             onInput={(e) => setPasteText((e.target as HTMLTextAreaElement).value)}
           />
-          <button class="button primary" disabled={!pasteText.trim()} onClick={() => openText(pasteText, 'pasted text')}>
+          <button class="button primary" disabled={!pasteText.trim()} onClick={() => openText(pasteText, '')}>
             Read
           </button>
         </div>

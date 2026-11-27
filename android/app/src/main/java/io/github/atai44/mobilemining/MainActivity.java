@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(AnkiDroidPlugin.class);
+        registerPlugin(LookupPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

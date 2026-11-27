@@ -105,6 +105,12 @@ class LocalEngine {
     return { rotate: m.rotate, scores: m.scores };
   }
 
+  /** Candidates for one hand-drawn character (dark strokes on white). */
+  async handwriting(src: RGBAImage): Promise<{ c: string; p: number }[]> {
+    const m = await this.request<Extract<WorkerResponse, { type: 'written' }>>({ type: 'write', id: this.nextId++, src }, [src.data.buffer]);
+    return m.chars;
+  }
+
   async rec(imageId: number, geoms: LineGeomMsg[]): Promise<(OcrLine | null)[]> {
     const m = await this.request<Extract<WorkerResponse, { type: 'recognized' }>>({ type: 'rec', id: this.nextId++, imageId, geoms });
     return m.lines;

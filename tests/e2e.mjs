@@ -154,7 +154,7 @@ await shot('02-settings');
   const look = await page.evaluate(() => [document.documentElement.dataset.theme, getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(), document.documentElement.style.getPropertyValue('--hl')]);
   await page.click('[data-testid=theme] >> text=Light');
   const light = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
-  check(look[0] === 'dark' && look[1] === '#161513' && look[2] === 'rgba(0, 170, 255, 0.45)' && light === '#f6f5f2', `theme and highlight colour settings (${look.join(' ')}; light ${light})`);
+  check(look[0] === 'dark' && look[1] === '#1a1a1b' && look[2] === 'rgba(0, 170, 255, 0.45)' && light === '#f0f0f0', `theme and highlight colour settings (${look.join(' ')}; light ${light})`);
   await page.click('[data-testid=theme] >> text=Auto');
   check(!(await page.$eval('.settings', (e) => e.innerText)).includes('wasm'), 'no engine jargon in Settings');
 }
@@ -829,6 +829,47 @@ await shot('09-mined');
   await page.waitForSelector('.conn-ok', { timeout: 15_000 }).catch(() => {});
   const posts = await page.evaluate(() => window.__native.filter(([p, m, o]) => p === 'CapacitorHttp' && m === 'post').map(([, , o]) => o.data.action));
   check(!!(await page.$('.conn-ok')) && posts.includes('version') && posts.includes('deckNames'), `app: AnkiConnect through native HTTP (${[...new Set(posts)].join(', ')})`);
+}
+
+// 15. Text from the clipboard is opened and its first word looked up without further taps
+{
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await tab('Capture');
+  await page.evaluate(() => navigator.clipboard.writeText('昨日は図書館で本を読んだ。'));
+  await page.click('[data-testid=text-button]');
+  await page.waitForSelector('[data-testid=popup] .entry', { timeout: 15_000 }).catch(() => {});
+  const head = await page.$eval('[data-testid=popup] .entry .headword', (e) => e.textContent).catch(() => '');
+  check(head.startsWith('昨日') && (await readerText()).includes('図書館'), `clipboard text opens with its first word looked up (${head})`);
+  // With the setting off, the Text button shows the box to type in
+  await tab('Settings');
+  await page.click('[data-testid=auto-paste]');
+  await tab('Capture');
+  await page.click('[data-testid=text-button]');
+  check(!!(await page.waitForSelector('.paste-area', { timeout: 5000 }).catch(() => null)), 'with auto-paste off, the Text button shows the text box');
+  await tab('Settings');
+  await page.click('[data-testid=auto-paste]');
+}
+
+// 16. Handwriting: draw the character when it isn't among the OCR's candidates
+{
+  await ocr('horizontal.png');
+  await tapChar('猫');
+  await page.click('[data-testid=handwrite-open]');
+  const pad = await page.$eval('.handwrite-pad', (e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  const strokes = [[[0.15, 0.35], [0.85, 0.35]], [[0.5, 0.1], [0.5, 0.9]], [[0.48, 0.38], [0.15, 0.8]], [[0.52, 0.38], [0.85, 0.8]]]; // 木
+  for (const st of strokes) {
+    await page.mouse.move(pad.x + st[0][0] * pad.w, pad.y + st[0][1] * pad.h);
+    await page.mouse.down();
+    for (const pt of st.slice(1)) await page.mouse.move(pad.x + pt[0] * pad.w, pad.y + pt[1] * pad.h, { steps: 6 });
+    await page.mouse.up();
+  }
+  await page.waitForSelector('[data-testid=handwrite-cand]', { timeout: 30_000 }).catch(() => {});
+  const cands = await page.$$eval('[data-testid=handwrite-cand]', (e) => e.map((x) => x.textContent));
+  if (cands[0] === '木') await page.click('[data-testid=handwrite-cand] >> nth=0');
+  await page.waitForFunction(() => document.querySelector('[data-testid=ocr-status]')?.textContent.includes('selected'), null, { timeout: 10_000 }).catch(() => {});
+  await toText();
+  const text = await readerText();
+  check(cands[0] === '木' && text.includes('吾輩は木である'), `handwritten character recognized and put in the text (${cands.slice(0, 4).join(' ')}; ${text.split('\n')[0]})`);
 }
 
 await browser.close();

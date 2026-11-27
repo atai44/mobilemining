@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { signal } from '@preact/signals';
-import { scan, opening, settings, updateSettings, view, showToast, ocrState, locate, indexOf } from '../store';
+import { scan, opening, autoLookup, settings, updateSettings, view, showToast, ocrState, locate, indexOf } from '../store';
 import {
   runOcr, rotateScan, startAnalysis, focusAt, setEditedText, showPdfPage,
   mergeSections, moveSection, deleteSection, redirectSection, resetSections,
@@ -32,6 +32,19 @@ export function ScanView() {
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => setPopup(null), [s?.url, mode]);
+
+  // Text that was just opened (pasted, shared): look up its first word without a tap.
+  useEffect(() => {
+    if (!s || !autoLookup.value) return;
+    autoLookup.value = false;
+    const first = s.text.findIndex((c) => /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(c));
+    if (first < 0) return;
+    const id = requestAnimationFrame(() => {
+      const el = rootRef.current?.querySelector(`[data-i="${first}"]`);
+      lookupAt(first, el?.getBoundingClientRect() ?? new DOMRect());
+    });
+    return () => cancelAnimationFrame(id);
+  }, [s?.text]);
 
   if (!s) {
     if (opening.value !== null) {

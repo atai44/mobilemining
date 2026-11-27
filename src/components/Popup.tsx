@@ -4,6 +4,7 @@ import { getKanji, tagDescriptions, type Kanji } from '../lib/db';
 import { furiganaSegments, isKanji } from '../lib/kana';
 import { audioUrl, findDuplicates, usesApi, viewNote } from '../lib/anki';
 import { checkAudio, playAudio, type AudioStatus } from '../lib/audio';
+import { HandwritePad } from './HandwritePad';
 import { renderGlossaryItem } from '../lib/yomitan/render';
 import { dictionaryTags, lookupYKanji, resolveMediaImages } from '../lib/yomitan/query';
 import type { YKanji, YKanjiMeta } from '../lib/yomitan/types';
@@ -30,6 +31,7 @@ type AnkiState = { dupes: number[]; added?: number; busy?: boolean };
 export function Popup({ docked, index, results: initialResults, anchor, onClose, onRelookup, onEdit }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [kanji, setKanji] = useState<string | null>(null);
+  const [writing, setWriting] = useState(false);
   const [tags, setTags] = useState<Record<string, string>>({});
   const [anki, setAnki] = useState<Record<string, AnkiState>>({});
   const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number; width: number } | null>(null);
@@ -147,16 +149,18 @@ export function Popup({ docked, index, results: initialResults, anchor, onClose,
           {docked && <button class="icon-button small" onClick={onClose} aria-label="Close dictionary" data-testid="close-panel">✕</button>}
         </div>
       )}
-      {!nested && meta?.alts?.length ? (
+      {!nested && meta && s.canvas ? (
         <div class="ocr-alts">
           <span class="muted small" data-testid="ocr-status"><b lang="ja">{tapped}</b> {meta.fixed === 'user' ? 'selected' : meta.fixed === 'furigana' ? 'furigana' : `${Math.round(meta.p * 100)}%`}</span>
-          {meta.alts.map((a) => (
+          {(meta.alts ?? []).map((a) => (
             <button key={a.c} class="alt" lang="ja" onClick={() => replaceChar(a.c)} title={`${Math.round(a.p * 100)}%`}>
               {a.c}
             </button>
           ))}
+          <button class={`alt write${writing ? ' active' : ''}`} onClick={() => setWriting(!writing)} title="Write it by hand" aria-label="Write it by hand" data-testid="handwrite-open">✎</button>
         </div>
       ) : null}
+      {!nested && writing && meta && <HandwritePad onPick={(c) => { setWriting(false); replaceChar(c); }} onClose={() => setWriting(false)} />}
       {kanji ? (
         <KanjiCard c={kanji} onBack={() => setKanji(null)} />
       ) : results.length === 0 ? (

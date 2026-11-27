@@ -25,6 +25,29 @@
 
         </activity>
 
+        <!-- "MobileMining" in the text-selection menu of other apps, and shared text: the
+             dictionary opens as a panel over the app you are in. -->
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".LookupActivity"
+            android:label="@string/app_name"
+            android:theme="@style/AppTheme.Lookup"
+            android:launchMode="singleTask"
+            android:taskAffinity="io.github.atai44.mobilemining.lookup"
+            android:excludeFromRecents="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

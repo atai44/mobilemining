@@ -81,6 +81,10 @@ uploaded unless you turn on the optional cloud OCR engine. After the first load 
     duplicate notes. Without a loaded note type the built-in `MobileMining` type is used.
   - **Export → TSV**: text only, for Anki's File → Import.
 
+- **Text**: the Text button opens what is on the clipboard and looks up its first word straight away (can be turned
+  off). **Handwriting**: when the right character isn't among the OCR's candidates, ✎ lets you draw it; the same
+  on-device recognizer reads the drawing.
+
 ## Android app
 
 The same app as an APK, with one thing a web page can't do: **adding cards straight into AnkiDroid** through its
@@ -96,6 +100,8 @@ checks. No AnkiConnect, no import step.
 - Everything else is the web app: OCR models and the dictionary are inside the APK (nothing to download), data
   stays on the device, and backups from the web version can be restored in the app.
 - Files the app creates (backup, `.apkg`, TSV) are handed to Android's share sheet.
+- **Look up text from any app**: select text anywhere and choose *MobileMining* in the selection menu (or share
+  text to it). The dictionary opens as a panel over the app you are in; cards can be added from there.
 
 - AnkiConnect also works from the app, without the browser's limits: AnkiConnect Android on the phone, or Anki on a
   computer on the same Wi-Fi (URL `http://<computer-ip>:8765`, AnkiConnect's `webBindAddress` set to `0.0.0.0`).
