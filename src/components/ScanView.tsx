@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { signal } from '@preact/signals';
-import { scan, opening, autoLookup, settings, updateSettings, view, showToast, ocrState, locate, indexOf } from '../store';
+import { scan, opening, autoLookup, lookupPanel, settings, updateSettings, view, showToast, ocrState, locate, indexOf } from '../store';
 import {
   runOcr, rotateScan, startAnalysis, focusAt, setEditedText, showPdfPage,
   mergeSections, moveSection, deleteSection, redirectSection, resetSections,
@@ -13,6 +13,7 @@ import { lookupAt as dictLookup } from '../dictionaries';
 import type { Rect } from '../lib/ocr/client';
 import type { Orientation, Point } from '../lib/ocr/types';
 import { Popup } from './Popup';
+import { closeLookupPanel } from '../lib/native';
 import { MineSheet, type MineRequest } from './MineSheet';
 
 type Mode = 'image' | 'text';
@@ -82,6 +83,11 @@ export function ScanView() {
   const r0 = livePopup?.results[0];
   const hl = livePopup ? { start: popupIndex, end: popupIndex + (r0 ? r0.span ?? r0.length : 1) } : null;
 
+  // The lookup panel over another app shows only the dictionary when the selection is the word
+  // itself; a longer selection keeps its text on top, to pick words from (and as the card's sentence).
+  const JA = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+  const dictOnly = lookupPanel.value && !!hl && !s.text.some((c, i) => (i < hl.start || i >= hl.end) && JA.test(c));
+
   // Drag the panel's edge to resize it.
   const startResize = (e: PointerEvent) => {
     const root = rootRef.current;
@@ -107,7 +113,7 @@ export function ScanView() {
   panelSizeRef.current = panelSize;
 
   return (
-    <div class={`scan ${livePopup ? 'has-panel' : ''}`} ref={rootRef} style={{ '--panel-size': `${Math.round(panelSize * 100)}%` }}>
+    <div class={`scan ${livePopup ? 'has-panel' : ''} ${dictOnly ? 'dict-only' : ''}`} ref={rootRef} style={{ '--panel-size': `${Math.round(panelSize * 100)}%` }}>
       <div class="scan-main">
         {effectiveMode === 'image' ? (
           <ImageReader highlight={hl} onTap={lookupAt} onEmptyTap={() => setPopup(null)} onShowText={() => setMode('text')} />
@@ -124,7 +130,7 @@ export function ScanView() {
             index={popupIndex}
             results={livePopup.results}
             anchor={livePopup.anchor}
-            onClose={() => setPopup(null)}
+            onClose={() => (dictOnly ? closeLookupPanel() : setPopup(null))}
             onRelookup={() => {
               const el = rootRef.current?.querySelector(`[data-i="${popupIndex}"]`);
               lookupAt(popupIndex, el?.getBoundingClientRect() ?? livePopup.anchor);

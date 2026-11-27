@@ -443,3 +443,9 @@ progress { height: 6px; }
 .lookup-panel { background: var(--bg); border-top: 2px solid var(--accent); padding-top: 0; }
 .lookup-bar { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
 .lookup-panel .page { padding-bottom: 10px; }
+.lookup-panel .scan { padding-bottom: 0; }
+.lookup-panel .text-panel .toolbar { display: none; }
+/* A single selected word: nothing but its dictionary entry */
+.scan.dict-only .scan-main, .scan.dict-only .panel-grip { display: none; }
+.scan.dict-only .dict-panel { flex: 1; border-top: 0; }
+.lookup-panel:has(.dict-only) .lookup-bar { display: none; }
