@@ -113,7 +113,7 @@ export function CaptureView() {
 
       <OcrCard />
       {isAndroid() && !isNative() && (
-        <p class="center small"><a href="./mobilemining.apk" data-testid="apk-link">Android app ↓</a> <span class="muted">adds straight to AnkiDroid</span></p>
+        <p class="center small"><a href="./mobilemining.apk" data-testid="apk-link">Android app ↓</a></p>
       )}
     </div>
   );
