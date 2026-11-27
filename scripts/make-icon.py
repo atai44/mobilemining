@@ -50,8 +50,8 @@ def base(style=1):
     for (x, y) in [(11, 20), (12, 20), (10, 19)]:
         dot(x, y, SHADE)
     # pickaxe head: a crescent across the end of the handle (in front of the head)
-    # a real crescent: both tips bend back toward the handle
-    arc = [(6, 21), (5, 20), (4, 19), (3, 18), (2, 17), (2, 16), (2, 15), (3, 14), (4, 13), (5, 12), (6, 11), (7, 11), (8, 11), (9, 12), (10, 13)]
+    # a quarter-round head: one tip points along the top, the other straight down
+    arc = [(2, 21), (2, 20), (2, 19), (2, 18), (2, 17), (3, 16), (3, 15), (4, 14), (5, 13), (6, 12), (7, 12), (8, 12), (9, 12), (10, 12), (11, 12)]
     if style >= 2:   # a longer, heavier head
         arc = [(0, 22), (0, 21), (0, 20)] + arc + [(10, 9), (11, 9)]
     iron = set()
