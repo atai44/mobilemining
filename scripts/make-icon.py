@@ -17,8 +17,8 @@ WOOD, WOOD2, IRON, IRON2 = (150, 98, 56), (112, 70, 38), (196, 202, 210), (120, 
 
 
 N, TOP = 28, 2
-OUTLINE = (22, 44, 72)
-METAL = ((196, 202, 210), (196, 202, 210), (120, 126, 134))   # highlight, mid, shadow
+OUTLINE = (16, 24, 36)
+METAL = ((255, 255, 255), (200, 206, 214), (92, 98, 108))   # highlight, mid, shadow
 
 
 def base(style=1):
@@ -34,10 +34,10 @@ def base(style=1):
 
     # (drawn facing right, mirrored at the end)
     # tail: a solid curl, two pixels thick (no diagonal-only joins)
-    tail = [(x, y) for x in (2, 3) for y in range(23, 32)] + [(x, y) for y in (22, 23) for x in range(3, 7)] + [(x, y) for x in (5, 6) for y in (24, 25)]
+    tail = [(x, y) for x in (2, 3) for y in range(26, 32)] + [(x, y) for y in (25, 26) for x in range(3, 7)] + [(x, y) for x in (5, 6) for y in (27, 28)]
     for (x, y) in tail:
         dot(x, y, FUR)
-    for (x, y) in [(2, y) for y in range(23, 32)] + [(6, 25), (5, 25)]:
+    for (x, y) in [(2, y) for y in range(26, 32)] + [(6, 28), (5, 28)]:
         dot(x, y, SHADE)
     # body, sitting
     for y, (a, b) in {21: (11, 19), 22: (10, 20), 23: (9, 21), 24: (9, 21), 25: (8, 21), 26: (8, 21), 27: (8, 21), 28: (8, 22), 29: (8, 23), 30: (8, 24), 31: (8, 24)}.items():
@@ -50,7 +50,8 @@ def base(style=1):
     for (x, y) in [(11, 20), (12, 20), (10, 19)]:
         dot(x, y, SHADE)
     # pickaxe head: a crescent across the end of the handle (in front of the head)
-    arc = [(1, 19), (1, 18), (2, 17), (2, 16), (3, 15), (3, 14), (4, 13), (5, 12), (6, 11), (7, 11), (8, 10), (9, 10)]
+    # a real crescent: both tips bend back toward the handle
+    arc = [(6, 21), (5, 20), (4, 19), (3, 18), (2, 17), (2, 16), (2, 15), (3, 14), (4, 13), (5, 12), (6, 11), (7, 11), (8, 11), (9, 12), (10, 13)]
     if style >= 2:   # a longer, heavier head
         arc = [(0, 22), (0, 21), (0, 20)] + arc + [(10, 9), (11, 9)]
     iron = set()
@@ -87,10 +88,11 @@ def base(style=1):
     for y in (6, 7):
         row(y, 23, 25, LAMP)
 
-    if style >= 1:   # a dark edge where the pick head meets the background
+    if style >= 1:   # a dark edge around the pick head
         for (x, y) in list(iron):
             for (xx, yy) in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
-                if (xx, yy) not in px:
+                # all the way round, also where it crosses the fur (but not over the helmet or handle)
+                if (xx, yy) not in iron and px.get((xx, yy)) not in (HAT, HAT_EDGE, BRIM, WOOD, WOOD2, LAMP, LAMP_RIM):
                     px[(xx, yy)] = OUTLINE
     # Framed tightly from the chest up, facing left: N×N pixels of the 32-wide drawing.
     im = Image.new('RGB', (N, N), BG)
