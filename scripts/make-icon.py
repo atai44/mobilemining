@@ -6,70 +6,88 @@
 import os
 from PIL import Image
 
-ROWS = """
-................................
-................................
-............YYYYYYYY............
-..........YYyyyyyyyyYY..........
-.........YyyyyLLLLyyyyY.........
-........YyyyyLWWWWLyyyyY........
-........YyyyyLWWWWLyyyyY........
-.......YyyyyyyLLLLyyyyyyY.......
-.......YyyyyyyyyyyyyyyyyY.......
-......DDDDDDDDDDDDDDDDDDDD......
-.....DddddddddddddddddddddD.....
-....EE.WWWWWWWWWWWWWWWWWW.EE....
-...EeeEWWWWWWWWWWWWWWWWWWEeeE...
-...EeeEWWBBBBBBWWBBBBBBWWEeeE...
-...EeeEWBBBBBBBBBBBBBBBBWEeeE...
-....EEWWBBOOOBBBBBBOOOBBWWEE....
-......WWBBOKOBBBBBBOKOBBWW......
-......WWBBOOOBBBBBBOOOBBWW......
-......WWWBBBBBBNNBBBBBBWWW......
-.......WWWBBBBBNNBBBBBWWW.......
-.......WWWWWBBBBBBBBWWWWW.......
-........WWWWWWMMMMWWWWWW........
-........SWWWWWWWWWWWWWWS........
-.........SWWWWWWWWWWWWS.........
-..........SSWWWWWWWWSS..........
-.........WWWSSSSSSSSWWW.........
-........WWWWWWWWWWWWWWWW........
-.......WWWWWWWWWWWWWWWWWW.......
-.......WWWWWWWWWWWWWWWWWW.......
-......SWWWWWWWWWWWWWWWWWWS......
-......SWWWWWWWWWWWWWWWWWWS......
-................................
-""".strip().split('\n')
+BG = (51, 102, 153)      # the app's blue
+FUR, SHADE = (247, 244, 236), (212, 206, 192)
+MASK, EAR, EAR2 = (96, 58, 36), (70, 42, 28), (120, 78, 54)
+BLACK, WHITE = (20, 16, 14), (255, 255, 255)
+HAT, HAT_EDGE, BRIM = (242, 194, 48), (196, 146, 22), (150, 110, 15)
+LAMP_RIM, LAMP = (110, 110, 110), (255, 250, 220)
+WOOD, WOOD2, IRON, IRON2 = (150, 98, 56), (112, 70, 38), (196, 202, 210), (120, 126, 134)
 
-COLORS = {
-    '.': (51, 102, 153),    # background (the app's blue)
-    'Y': (201, 152, 26),    # helmet outline
-    'y': (242, 194, 48),    # helmet
-    'L': (120, 120, 120),   # lamp rim
-    'W': (247, 244, 236),   # fur / lamp glass
-    'S': (214, 208, 194),   # fur shadow
-    'D': (150, 110, 15),    # helmet brim edge
-    'd': (224, 172, 34),    # helmet brim
-    'E': (74, 44, 26),      # ear outline
-    'e': (150, 100, 70),    # inner ear
-    'B': (110, 68, 40),     # face mask
-    'O': (255, 255, 255),   # eye white
-    'K': (20, 20, 20),      # pupil
-    'N': (50, 30, 20),      # nose
-    'M': (90, 50, 30),      # mouth
-}
 
 def base():
-    n = len(ROWS)
-    assert all(len(r) == n for r in ROWS), [len(r) for r in ROWS]
-    im = Image.new('RGB', (n, n))
-    im.putdata([COLORS[c] for r in ROWS for c in r])
+    """A 32×32 monkey in profile: white fur, brown face mask, a miner's helmet, pickaxe over the shoulder."""
+    px = {}
+
+    def row(y, a, b, c):
+        for x in range(a, b + 1):
+            px[(x, y)] = c
+
+    def dot(x, y, c):
+        px[(x, y)] = c
+
+    # (drawn facing right, mirrored at the end)
+    # tail
+    for (x, y) in [(9, 30), (8, 30), (7, 30), (6, 29), (5, 28), (4, 27), (4, 26), (4, 25), (5, 24), (6, 24), (7, 25), (7, 26), (6, 27)]:
+        dot(x, y, FUR)
+    for (x, y) in [(8, 31), (7, 31), (6, 30), (5, 29), (4, 28), (3, 27), (3, 26), (3, 25), (4, 24), (5, 23), (6, 23)]:
+        dot(x, y, SHADE)
+    # pickaxe head, behind the back: a crescent across the end of the handle
+    for (x, y) in [(1, 19), (1, 18), (2, 17), (2, 16), (3, 15), (3, 14), (4, 13), (5, 12), (6, 11), (7, 11), (8, 10), (9, 10)]:
+        dot(x, y, IRON); dot(x + 1, y, IRON); dot(x + 1, y + 1, IRON2)
+    dot(1, 20, IRON2); dot(10, 10, IRON2)
+    for i in range(0, 5):   # the handle behind the head
+        dot(5 + i, 13 + i, WOOD); dot(5 + i, 14 + i, WOOD2)
+    # body, sitting
+    for y, (a, b) in {21: (11, 19), 22: (10, 20), 23: (9, 21), 24: (9, 21), 25: (8, 21), 26: (8, 21), 27: (8, 21), 28: (8, 22), 29: (8, 23), 30: (8, 24), 31: (8, 24)}.items():
+        row(y, a, b, FUR); dot(a, y, SHADE)
+    for (x, y) in [(22, 30), (23, 30), (24, 30), (22, 31), (23, 31), (24, 31)]:
+        dot(x, y, SHADE)
+    # head
+    for y, (a, b) in {9: (11, 20), 10: (10, 21), 11: (9, 22), 12: (9, 22), 13: (9, 23), 14: (9, 23), 15: (9, 23), 16: (9, 24), 17: (9, 24), 18: (10, 23), 19: (10, 22), 20: (11, 20)}.items():
+        row(y, a, b, FUR)
+    for (x, y) in [(11, 20), (12, 20), (10, 19)]:
+        dot(x, y, SHADE)
+    # the handle, over the shoulder and down to the hand
+    for i in range(0, 11):
+        dot(10 + i, 18 + i, WOOD); dot(10 + i, 19 + i, WOOD2)
+    for (x, y) in [(20, 27), (21, 27), (20, 28), (21, 28), (22, 28), (21, 29), (22, 29)]:   # the hand
+        dot(x, y, FUR)
+    for (x, y) in [(20, 29), (21, 30), (22, 30), (23, 29)]:
+        dot(x, y, SHADE)
+    # ear
+    for y in (14, 15, 16, 17):
+        row(y, 11, 13, EAR)
+    dot(12, 15, EAR2); dot(12, 16, EAR2); dot(11, 14, FUR); dot(11, 17, FUR)
+    # face mask, snout forward; a white eye around a black pupil; nose
+    for y, (a, b) in {12: (18, 22), 13: (17, 23), 14: (17, 23), 15: (17, 24), 16: (18, 25), 17: (19, 25), 18: (20, 24)}.items():
+        row(y, a, b, MASK)
+    for y in (13, 14, 15):
+        row(y, 19, 21, WHITE)
+    dot(21, 14, BLACK)
+    dot(25, 16, BLACK)
+    # helmet, fitting the head, level, with the lamp at the front
+    dome = {3: (12, 19), 4: (10, 21), 5: (9, 22), 6: (8, 23), 7: (8, 23), 8: (8, 23), 9: (8, 23)}
+    for y, (a, b) in dome.items():
+        row(y, a, b, HAT); dot(a, y, HAT_EDGE); dot(b, y, HAT_EDGE)
+    row(3, 12, 19, HAT_EDGE)
+    row(10, 7, 27, BRIM)
+    for y in (5, 6, 7, 8):
+        row(y, 21, 25, LAMP_RIM)
+    for y in (6, 7):
+        row(y, 23, 25, LAMP)
+
+    im = Image.new('RGB', (32, 32), BG)
+    for (x, y), c in px.items():
+        if 0 <= x < 32 and 0 <= y < 32:
+            im.putpixel((31 - x, y), c)   # mirrored: he faces left
     return im
+
 
 root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 icon = base()
 up = lambda size: icon.resize((size, size), Image.NEAREST)
-bg = COLORS['.']
+bg = BG
 
 # Web
 for size in (192, 512):
