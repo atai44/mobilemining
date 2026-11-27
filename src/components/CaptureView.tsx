@@ -25,11 +25,11 @@ export function CaptureView() {
   const [pasting, setPasting] = useState(false);
   const [pasteText, setPasteText] = useState('');
 
-  // Text: what's on the clipboard is opened straight away (and its first word looked up);
-  // with nothing there, or with the setting off, the box to type or paste into is shown.
+  // Paste text: what's on the clipboard is opened on the Read tab straight away (and its first
+  // word looked up). Only when the clipboard is empty or can't be read is a box shown instead.
   const openTextInput = async () => {
     if (pasting) { setPasting(false); return; }
-    const clip = settings.value.display.autoPaste ? (await readClipboardText()).trim() : '';
+    const clip = (await readClipboardText()).trim();
     if (clip) openText(clip, '');
     else setPasting(true);
   };
@@ -84,7 +84,7 @@ export function CaptureView() {
           <span class="big-icon">🖼</span>Image / PDF
         </button>
         <button class="big-button" onClick={openTextInput} data-testid="text-button">
-          <span class="big-icon">⌨</span>Text
+          <span class="big-icon">⌨</span>Paste text
         </button>
       </div>
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={onFile} data-testid="camera-input" />

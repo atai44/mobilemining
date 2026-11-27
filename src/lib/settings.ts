@@ -39,7 +39,6 @@ export interface Settings {
     /** Colour of the looked-up word (#rrggbb). */
     highlight: string;
     /** The Text button opens what is on the clipboard straight away. */
-    autoPaste: boolean;
   };
   /** Dictionaries in priority order (built-in and imported). */
   dictionaries: DictionarySetting[];
@@ -77,7 +76,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   ocr: { engine: 'local', orientation: 'auto', detMaxSide: 1536, boxThresh: 0.5, unclipRatio: 1.5, cloudApiKey: '', autoRotate: true },
-  display: { fontSize: 22, vertical: false, highlightLowConfidence: true, hardLineBreaks: false, furigana: 'ruby', theme: 'auto', highlight: '#facc15', autoPaste: true },
+  display: { fontSize: 22, vertical: false, highlightLowConfidence: true, hardLineBreaks: false, furigana: 'ruby', theme: 'auto', highlight: '#facc15' },
   dictionaries: [
     { name: BUILTIN_JMDICT, enabled: true },
     { name: BUILTIN_KANJIDIC, enabled: true },

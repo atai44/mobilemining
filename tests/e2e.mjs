@@ -841,14 +841,12 @@ await shot('09-mined');
   await page.waitForSelector('[data-testid=popup] .entry', { timeout: 15_000 }).catch(() => {});
   const head = await page.$eval('[data-testid=popup] .entry .headword', (e) => e.textContent).catch(() => '');
   check(head.startsWith('昨日') && (await readerText()).includes('図書館'), `clipboard text opens with its first word looked up (${head})`);
-  // With the setting off, the Text button shows the box to type in
-  await tab('Settings');
-  await page.click('[data-testid=auto-paste]');
+  // With nothing on the clipboard, the box to type in is shown instead
   await tab('Capture');
+  await page.evaluate(() => navigator.clipboard.writeText(''));
   await page.click('[data-testid=text-button]');
-  check(!!(await page.waitForSelector('.paste-area', { timeout: 5000 }).catch(() => null)), 'with auto-paste off, the Text button shows the text box');
-  await tab('Settings');
-  await page.click('[data-testid=auto-paste]');
+  check(!!(await page.waitForSelector('.paste-area', { timeout: 5000 }).catch(() => null)), 'with an empty clipboard, Paste text shows the text box');
+  await page.click('[data-testid=text-button]');
 }
 
 // 16. Handwriting: draw the character when it isn't among the OCR's candidates
