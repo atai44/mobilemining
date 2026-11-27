@@ -12,6 +12,7 @@ MASK, EAR, EAR2 = (96, 58, 36), (70, 42, 28), (120, 78, 54)
 BLACK, WHITE = (20, 16, 14), (255, 255, 255)
 HAT, HAT_EDGE, BRIM = (242, 194, 48), (196, 146, 22), (150, 110, 15)
 LAMP_RIM, LAMP = (110, 110, 110), (255, 250, 220)
+HAND_EDGE = (150, 140, 124)
 WOOD, WOOD2, IRON, IRON2 = (150, 98, 56), (112, 70, 38), (196, 202, 210), (120, 126, 134)
 
 
@@ -32,12 +33,6 @@ def base():
         dot(x, y, FUR)
     for (x, y) in [(8, 31), (7, 31), (6, 30), (5, 29), (4, 28), (3, 27), (3, 26), (3, 25), (4, 24), (5, 23), (6, 23)]:
         dot(x, y, SHADE)
-    # pickaxe head, behind the back: a crescent across the end of the handle
-    for (x, y) in [(1, 19), (1, 18), (2, 17), (2, 16), (3, 15), (3, 14), (4, 13), (5, 12), (6, 11), (7, 11), (8, 10), (9, 10)]:
-        dot(x, y, IRON); dot(x + 1, y, IRON); dot(x + 1, y + 1, IRON2)
-    dot(1, 20, IRON2); dot(10, 10, IRON2)
-    for i in range(0, 5):   # the handle behind the head
-        dot(5 + i, 13 + i, WOOD); dot(5 + i, 14 + i, WOOD2)
     # body, sitting
     for y, (a, b) in {21: (11, 19), 22: (10, 20), 23: (9, 21), 24: (9, 21), 25: (8, 21), 26: (8, 21), 27: (8, 21), 28: (8, 22), 29: (8, 23), 30: (8, 24), 31: (8, 24)}.items():
         row(y, a, b, FUR); dot(a, y, SHADE)
@@ -48,13 +43,27 @@ def base():
         row(y, a, b, FUR)
     for (x, y) in [(11, 20), (12, 20), (10, 19)]:
         dot(x, y, SHADE)
-    # the handle, over the shoulder and down to the hand
-    for i in range(0, 11):
+    # pickaxe head: a crescent across the end of the handle (in front of the head)
+    for (x, y) in [(1, 19), (1, 18), (2, 17), (2, 16), (3, 15), (3, 14), (4, 13), (5, 12), (6, 11), (7, 11), (8, 10), (9, 10)]:
+        dot(x, y, IRON); dot(x + 1, y, IRON); dot(x + 1, y + 1, IRON2)
+    dot(1, 20, IRON2); dot(10, 10, IRON2)
+    for i in range(0, 5):   # the top of the handle
+        dot(5 + i, 13 + i, WOOD); dot(5 + i, 14 + i, WOOD2)
+    # the handle, over the shoulder, through the hand and a little beyond
+    for i in range(0, 13):
         dot(10 + i, 18 + i, WOOD); dot(10 + i, 19 + i, WOOD2)
-    for (x, y) in [(20, 27), (21, 27), (20, 28), (21, 28), (22, 28), (21, 29), (22, 29)]:   # the hand
+    # the arm reaching forward and the hand gripping the handle, outlined so they read
+    for x in range(13, 19):   # the forearm, coming across below the handle
+        dot(x, 28, FUR); dot(x, 29, FUR)
+    for x in range(13, 18):
+        dot(x, 27, SHADE)
+    for x in range(13, 19):
+        dot(x, 30, SHADE)
+    dot(12, 28, SHADE); dot(12, 29, SHADE)
+    for (x, y) in [(19, 26), (20, 26), (18, 27), (19, 27), (20, 27), (21, 27), (19, 28), (20, 28), (21, 28)]:
         dot(x, y, FUR)
-    for (x, y) in [(20, 29), (21, 30), (22, 30), (23, 29)]:
-        dot(x, y, SHADE)
+    for (x, y) in [(19, 25), (20, 25), (21, 26), (22, 27), (22, 28), (21, 29), (20, 29), (19, 29), (18, 28)]:
+        dot(x, y, HAND_EDGE)
     # ear
     for y in (14, 15, 16, 17):
         row(y, 11, 13, EAR)
