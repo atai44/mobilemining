@@ -18,7 +18,7 @@ WOOD, WOOD2, IRON, IRON2 = (150, 98, 56), (112, 70, 38), (196, 202, 210), (120, 
 
 N, TOP = 28, 2
 OUTLINE = (16, 24, 36)
-SOFT_EDGE = (176, 178, 180)
+SOFT_EDGE = (104, 108, 116)
 METAL = ((255, 255, 255), (200, 206, 214), (92, 98, 108))   # highlight, mid, shadow
 
 
@@ -53,6 +53,28 @@ def base(style=1):
     # pickaxe head: a crescent across the end of the handle (in front of the head)
     # the top of the handle: under the metal, with its end poking out on the far side of the head
     for i in range(-2, 5):
+        dot(5 + i, 15 + i, WOOD); dot(5 + i, 16 + i, WOOD2)
+    # a quarter-round head, the same on both sides of the handle: one half is drawn (the arm
+    # pointing down) and mirrored across the handle's line for the arm pointing along the top
+    half = [(2, 23), (2, 22), (2, 21), (2, 20), (2, 19), (3, 18), (3, 17), (4, 16), (5, 15)]
+    iron = set()
+    for (x, y) in half:
+        for (xx, yy, c) in [(x, y, METAL[0]), (x + 1, y, METAL[1]), (x + 1, y + 1, METAL[2])]:
+            for (ax, ay) in ((xx, yy), (yy - 10, xx + 10)):
+                dot(ax, ay, c); iron.add((ax, ay))
+    # body, sitting
+    for y, (a, b) in {21: (11, 19), 22: (10, 20), 23: (9, 21), 24: (9, 21), 25: (8, 21), 26: (8, 21), 27: (8, 21), 28: (8, 22), 29: (8, 23), 30: (8, 24), 31: (8, 24)}.items():
+        row(y, a, b, FUR); dot(a, y, SHADE)
+    for (x, y) in [(22, 30), (23, 30), (24, 30), (22, 31), (23, 31), (24, 31)]:
+        dot(x, y, SHADE)
+    # head
+    for y, (a, b) in {9: (11, 20), 10: (10, 21), 11: (9, 22), 12: (9, 22), 13: (9, 23), 14: (9, 23), 15: (9, 23), 16: (9, 24), 17: (9, 24), 18: (10, 23), 19: (10, 22), 20: (11, 20)}.items():
+        row(y, a, b, FUR)
+    for (x, y) in [(11, 20), (12, 20), (10, 19)]:
+        dot(x, y, SHADE)
+    # pickaxe head: a crescent across the end of the handle (in front of the head)
+    # the top of the handle: under the metal, with its end poking out on the far side of the head
+    for i in range(-2, 5):
         dot(5 + i, 13 + i, WOOD); dot(5 + i, 14 + i, WOOD2)
     # a quarter-round head: one tip points along the top, the other straight down
     arc = [(2, 21), (2, 20), (2, 19), (2, 18), (2, 17), (3, 16), (3, 15), (4, 14), (5, 13), (6, 12), (7, 12), (8, 12), (9, 12), (10, 12), (11, 12)]
@@ -67,7 +89,7 @@ def base(style=1):
         dot(1, 20, METAL[2]); dot(10, 10, METAL[2])
     # the handle, over the shoulder, through the hand and a little beyond
     for i in range(0, 13):
-        dot(10 + i, 18 + i, WOOD); dot(10 + i, 19 + i, WOOD2)
+        dot(10 + i, 20 + i, WOOD); dot(10 + i, 21 + i, WOOD2)
     # ear
     for y in (14, 15, 16, 17):
         row(y, 11, 13, EAR)
